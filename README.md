@@ -31,10 +31,9 @@ docker run -p 6333:6333 -p 6334:6334 \
     qdrant/qdrant
 ```
 * Qdrant is now accessible at these endpoints:   
-
-- REST API: ```localhost:6333```
-- Web UI: ```localhost:6333/dashboard```
-- GRPC API: ```localhost:6334```
+    - REST API: ```localhost:6333```
+    - Web UI: ```localhost:6333/dashboard```
+    - GRPC API: ```localhost:6334```
 
 ### Install & run Qdrant service
 
