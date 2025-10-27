@@ -1,0 +1,45 @@
+[Unit]
+Description=RAG Web App (LlamaIndex + Qdrant)
+Wants=network-online.target qdrant-container.service
+After=network-online.target ollama.service qdrant-container.service
+Requires=ollama.service qdrant-container.service
+
+[Service]
+Type=simple
+User=riggi
+WorkingDirectory=/home/riggi/Analysis/MLProjects/RadioRAG/service-wdir
+Environment=PYTHONUNBUFFERED=1
+
+# Default values (can be overridden via EnvironmentFile or `systemctl edit`)
+Environment=EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B
+Environment=CHUNK_SIZE=1024
+Environment=COLLECTION_NAME=radiopapers
+Environment=LLM=llama3.1:8b
+Environment=LLM_URL=http://localhost:11434
+Environment=LLM_KEEP_ALIVE=0s
+Environment=LLM_CTX_WINDOW=8192
+Environment=LLM_TIMEOUT=120
+Environment=QDRANT_URL=http://localhost:6333
+Environment=SIMILARITY_THR=0.5
+
+# Optional external overrides:
+#EnvironmentFile=-/etc/rag.env
+# (Create /etc/rag.env with lines like: LLM=llama3.1:8b QDRANT_URL=http://localhost:6333 ...)
+
+# Wait for Ollama HTTP and Qdrant HTTP before starting
+ExecStartPre=/usr/bin/bash -lc 'for i in {1..60}; do curl -sf http://localhost:11434/api/tags >/dev/null && exit 0 || sleep 1; done; echo "Ollama not ready" >&2; exit 1'
+ExecStartPre=/usr/bin/bash -lc 'for i in {1..120}; do curl -sf ${QDRANT_URL}/readyz >/dev/null && exit 0 || sleep 1; done; echo "Qdrant not ready" >&2; exit 1'
+
+# Run your script (which uses env vars above)
+ExecStart=/usr/bin/env bash -lc '/home/riggi/Analysis/MLProjects/RadioRAG/service-wdir/launch_rag.sh'
+
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+# (Optional) basic hardening
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
