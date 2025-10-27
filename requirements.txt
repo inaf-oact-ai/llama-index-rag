@@ -1,0 +1,10 @@
+llama-index
+llama-index-embeddings-huggingface
+llama-index-llms-ollama
+llama-index-vector-stores-qdrant
+qdrant-client
+structlog
+pydantic
+fastapi[standard]
+uvicorn
+huggingface_hub
