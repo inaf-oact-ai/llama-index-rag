@@ -83,7 +83,7 @@ ollama list
 ```
 
 ### Download HF models    
-* Download embedding models from HuggingFace. Below, we list possible options, some currently highly ranked in the leaderboard (`https://huggingface.co/spaces/mteb/leaderboard`):   
+* Download embedding models from HuggingFace. Below, we list possible options, some currently highly ranked in the leaderboard (https://huggingface.co/spaces/mteb/leaderboard):   
 ```
 export HF_HOME="/scratch/huggingface"
 hf download sentence-transformers/all-mpnet-base-v2
