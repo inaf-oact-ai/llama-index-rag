@@ -1,0 +1,23 @@
+[Unit]
+Description=Qdrant (Docker)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+Restart=always
+TimeoutStartSec=0
+SuccessExitStatus=143
+
+# Create/Start the container (idempotent)
+ExecStartPre=-/usr/bin/docker rm -f qdrant
+ExecStart=/usr/bin/docker run --name qdrant \
+  -p 6333:6333 -p 6334:6334 \
+  -v "/scratch/qdrant/storage:/qdrant/storage:z" \
+  qdrant/qdrant
+
+ExecStop=/usr/bin/docker stop -t 10 qdrant
+ExecStopPost=-/usr/bin/docker rm -f qdrant
+
+[Install]
+WantedBy=multi-user.target
