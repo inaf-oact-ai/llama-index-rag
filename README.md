@@ -112,7 +112,7 @@ source /home/riggi/software/venvs/llama-index-rag/bin/activate
 DATA_PATH="/home/riggi/Documents/papers"
 COLLECTION="papers"
 CHUNK_SIZE=1024
-MODEL="Qwen/Qwen3-Embedding-0.6B"
+EMBEDDING_MODEL="Qwen/Qwen3-Embedding-0.6B"
 QDRANT_URL="http://localhost:6333"
 
 ############################
@@ -126,9 +126,46 @@ python scripts/ingest_doc.py \
   --collection_name=$COLLECTION \
   --chunk_size=$CHUNK_SIZE \
   --file_exts=".pdf" --recursive \
-  --embedding_model=$MODEL \
+  --embedding_model=$EMBEDDING_MODEL \
   --qdrant_url=$QDRANT_URL
 
 date
 echo "INFO: End doc upload"
+```
+
+### **Run RAG service**
+With Qdrant service up and running and after filling a document collection, use the provided script `launch_rag.py` to start the RAG application. Below, we show a bash script example:  
+
+```
+#!/bin/bash
+
+############################
+##   ENV
+############################
+# - Source env
+source /home/riggi/software/venvs/llama-index-rag/bin/activate
+
+# - Set options
+EMBEDDING_MODEL="Qwen/Qwen3-Embedding-0.6B"
+CHUNK_SIZE=1024
+COLLECTION_NAME="papers"
+LLM="llama3.1:8b"
+LLM_URL="http://localhost:11434"
+LLM_KEEP_ALIVE="0s"
+LLM_CTX_WINDOW=8192
+LLM_TIMEOUT=120
+QDRANT_URL="http://localhost:6333"
+SIMILARITY_THR=0.6
+
+# - Run
+python scripts/launch_rag.py \
+  --embedding_model=$EMBEDDING_MODEL \
+  --chunk_size=$CHUNK_SIZE \
+  --collection_name=$COLLECTION_NAME \
+  --llm=$LLM --llm_url=$LLM_URL \
+  --llm_keep_alive=$LLM_KEEP_ALIVE \
+  --llm_ctx_window=$LLM_CTX_WINDOW \
+  --llm_timeout=$LLM_TIMEOUT \
+  --qdrant_url=$QDRANT_URL \
+  --similarity_thr=$SIMILARITY_THR
 ```
