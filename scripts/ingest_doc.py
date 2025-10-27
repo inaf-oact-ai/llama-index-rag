@@ -101,7 +101,9 @@ def main():
     # - Load embedded model
     logger.info(f"Loading embedder model {args.embedding_model} ...")
     embed_model = HuggingFaceEmbedding(
-        model_name=args.embedding_model, cache_folder="./cache", trust_remote_code=True
+        model_name=args.embedding_model, 
+        #cache_folder="./cache", 
+        trust_remote_code=True
     )
 
     #=============================================
