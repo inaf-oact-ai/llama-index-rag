@@ -93,4 +93,42 @@ hf download nvidia/llama-embed-nemotron-8b
 ```
 
 ## **Usage**  
-WRITE ME   
+
+### **Upload docs to Qdrant storage**
+Use the provided script `ingest.doc.py` to upload docs or scientific papers in the Qdrant storage. Below, we show a bash script example:    
+
+```
+#!/bin/bash
+
+############################
+##   ENV
+############################
+# - Source env
+source /home/riggi/software/venvs/llama-index-rag/bin/activate
+
+############################
+##  OPTIONS
+############################
+DATA_PATH="/home/riggi/Documents/papers"
+COLLECTION="papers"
+CHUNK_SIZE=1024
+MODEL="Qwen/Qwen3-Embedding-0.6B"
+QDRANT_URL="http://localhost:6333"
+
+############################
+##   RUN
+############################
+echo "INFO: Start doc upload ..."
+date
+
+python scripts/ingest_doc.py \
+  --data_path=$DATA_PATH \
+  --collection_name=$COLLECTION \
+  --chunk_size=$CHUNK_SIZE \
+  --file_exts=".pdf" --recursive \
+  --embedding_model=$MODEL \
+  --qdrant_url=$QDRANT_URL
+
+date
+echo "INFO: End doc upload"
+```
