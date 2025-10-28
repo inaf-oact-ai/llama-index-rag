@@ -213,7 +213,7 @@ def main():
                 #)
                          
                 blob = (p.payload or {}).get("_node_content")
-                if not blob:
+                if not blob or not isinstance(blob, str):
                     continue  # nothing we can safely update
 
                 try:
@@ -221,9 +221,17 @@ def main():
                 except Exception:
                     continue  # skip malformed nodes
 
+
+                # sanity check: must keep a valid text
+                if not isinstance(node.get("text"), str) or node["text"] == "":
+                    # don't touch broken nodes; let the checker tell us which IDs to handle
+                    continue
+     
+                # merge metadata
                 node_meta = node.get("metadata") or {}
                 node_meta.update(payload_update)
                 node["metadata"] = node_meta
+
                 updated_blob = json.dumps(node, ensure_ascii=False)
 
                 client.set_payload(
