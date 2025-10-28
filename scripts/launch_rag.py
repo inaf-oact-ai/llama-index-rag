@@ -92,6 +92,9 @@ class Response(BaseModel):
 def load_args():
     """ Load arguments """
     parser = argparse.ArgumentParser()
+    parser.add_argument("-port", "--port", type=int, required=False, default=8000, help="Bind socket to this port.")
+    parser.add_argument("-host", "--host", type=str, required=False, default="127.0.0.1", help="Bind socket to this host. Use 0.0.0.0 to make the server available externally. ")
+    
     parser.add_argument("-embedding_model", "--embedding_model", type=str, required=False, default="mixedbread-ai/mxbai-embed-large-v1", help="Embedder model")
     parser.add_argument("-chunk_size", "--chunk_size", type=int, required=False, default=1024, help="Chunk size")
     parser.add_argument("-collection_name", "--collection_name", type=str, required=False, default="radiopapers", help="Collection name")
@@ -274,7 +277,7 @@ def main():
 
     # - Running server
     logger.info("Running app ...")
-    uvicorn.run(app)
+    uvicorn.run(app, host=args.host, port=args.port)
 
 if __name__ == "__main__":
     main()
