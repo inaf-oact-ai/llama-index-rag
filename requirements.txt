@@ -8,3 +8,5 @@ pydantic
 fastapi[standard]
 uvicorn
 huggingface_hub
+streamlit
+requests
