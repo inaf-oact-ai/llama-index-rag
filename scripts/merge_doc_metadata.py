@@ -153,6 +153,7 @@ def main():
         if not points:
             break
 
+        updates = [] 
         for p in points:
             scanned += 1
             pbar.update(1)
@@ -196,20 +197,41 @@ def main():
             payload_update = {k: v for k, v in payload_update.items() if v}
 
             if payload_update:
-                existing_meta = (p.payload or {}).get("metadata", {})
-                merged_meta = {**existing_meta, **payload_update}
+                #existing_meta = (p.payload or {}).get("metadata", {})
+                #merged_meta = {**existing_meta, **payload_update}
             
-                client.set_payload(
-                    collection_name=collection,
-                    payload={"metadata": merged_meta},
-                    points=[p.id],
-                )
+                #client.set_payload(
+                #    collection_name=collection,
+                #    payload={"metadata": merged_meta},
+                #    points=[p.id],
+                #)
 
                 #client.set_payload(
                 #    collection_name=collection,
                 #    payload=payload_update,
                 #    points=[p.id],
                 #)
+                         
+                blob = (p.payload or {}).get("_node_content")
+                if not blob:
+                    continue  # nothing we can safely update
+
+                try:
+                    node = json.loads(blob)
+                except Exception:
+                    continue  # skip malformed nodes
+
+                node_meta = node.get("metadata") or {}
+                node_meta.update(payload_update)
+                node["metadata"] = node_meta
+                updated_blob = json.dumps(node, ensure_ascii=False)
+
+                client.set_payload(
+                    collection_name=collection,
+                    payload={"_node_content": updated_blob},  # <-- only this field
+                    points=[p.id],
+                )
+    
                 updated += 1
 
         if offset is None:
