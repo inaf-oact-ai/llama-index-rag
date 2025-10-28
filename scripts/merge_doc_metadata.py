@@ -196,11 +196,20 @@ def main():
             payload_update = {k: v for k, v in payload_update.items() if v}
 
             if payload_update:
+                existing_meta = (p.payload or {}).get("metadata", {})
+                merged_meta = {**existing_meta, **payload_update}
+            
                 client.set_payload(
                     collection_name=collection,
-                    payload=payload_update,
+                    payload={"metadata": merged_meta},
                     points=[p.id],
                 )
+
+                #client.set_payload(
+                #    collection_name=collection,
+                #    payload=payload_update,
+                #    points=[p.id],
+                #)
                 updated += 1
 
         if offset is None:
