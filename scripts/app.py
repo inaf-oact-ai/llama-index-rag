@@ -7,12 +7,83 @@
 # - Import standard modules
 import os
 import time
+import re
 
 # - Import streamlit
 import requests
 import streamlit as st
 
 st.set_page_config(page_title="RAG Tester", page_icon="🔎", layout="centered")
+
+
+############################
+##     HELPER METHODS
+############################
+def _basename(fp: str | None, fallback: str | None) -> str:
+    if isinstance(fp, str) and fp:
+        return os.path.basename(fp)
+    return (fallback or "").strip() or "(unknown)"
+
+def _first_author(meta: dict) -> str | None:
+    # try a few common keys
+    candidates = [
+        meta.get("first_author"),
+        meta.get("author"),
+        meta.get("authors"),
+        meta.get("creator"),
+    ]
+    raw = next((c for c in candidates if isinstance(c, str) and c.strip()), None)
+    if not raw:
+        return None
+    s = raw.strip()
+
+    # split on common separators: semicolon, ' and ', ampersand, commas with "and"
+    parts = re.split(r"\s*;\s*|\s+and\s+|&|,\s*(?=[A-Z][a-z])", s)
+    first = parts[0].strip() if parts else s
+
+    # if it's "Last, First", normalize to "Last, F." (optional)
+    if "," in first:
+        last, firsts = [t.strip() for t in first.split(",", 1)]
+        initials = " ".join([f[0] + "." for f in firsts.split() if f])
+        return f"{last}, {initials}" if initials else last
+    return first
+
+def _journal_citation(meta: dict) -> str:
+    # Accept a variety of keys
+    title   = meta.get("title") or meta.get("paper_title") or meta.get("document_title")
+    journal = meta.get("journal") or meta.get("journal_name") or meta.get("container_title") or meta.get("publication")
+    volume  = meta.get("volume") or meta.get("vol")
+    issue   = meta.get("issue") or meta.get("number") or meta.get("no")
+    pages   = meta.get("pages") or meta.get("page") or meta.get("page_range")
+    year    = meta.get("year") or meta.get("pub_year") or meta.get("date") or meta.get("publication_year")
+
+    # try to extract a 4-digit year from date strings
+    if isinstance(year, str):
+        m = re.search(r"(19|20)\d{2}", year)
+        year = m.group(0) if m else year
+
+    bits = []
+    if title:   bits.append(f"“{title}”")
+    if journal: bits.append(journal)
+    vol_issue = None
+    if volume and issue:
+        vol_issue = f"{volume}({issue})"
+    elif volume:
+        vol_issue = str(volume)
+    if vol_issue: bits.append(vol_issue)
+    if pages:   bits.append(pages)
+    if year:    bits.append(str(year))
+    return ", ".join(bits)
+
+
+
+
+
+
+
+######################################
+##     APP
+######################################
 
 # --- Sidebar config ---
 st.sidebar.header("Backend Settings")
@@ -92,14 +163,50 @@ if submitted:
     if not sources_sorted:
         st.caption("No references.")
     else:
+        #for i, src in enumerate(sources_sorted, 1):
+        #    meta = src
+        #    file_name = meta.get("file_name")
+        #    file_path = meta.get("file_path")
+        #    page = meta.get("page_label")
+        #    score = meta.get("score")
+
+        #    display_name = file_name or _basename(file_path, file_name)
+        #    # Show filename (no basedir), page and similarity score
+        #    st.markdown(f"**{i}. {display_name}**  — page {page}, score {score:.3f}" if score is not None else
+        #                f"**{i}. {display_name}**  — page {page}")
+                        
         for i, src in enumerate(sources_sorted, 1):
-            meta = src
+            score = src.get("score")
+            meta  = src  # assuming your backend flattens node.metadata into the source dict
+
+            # basic file info
             file_name = meta.get("file_name")
             file_path = meta.get("file_path")
-            page = meta.get("page_label")
-            score = meta.get("score")
-
             display_name = file_name or _basename(file_path, file_name)
-            # Show filename (no basedir), page and similarity score
-            st.markdown(f"**{i}. {display_name}**  — page {page}, score {score:.3f}" if score is not None else
-                        f"**{i}. {display_name}**  — page {page}")
+
+            # page
+            page = meta.get("page_label") or meta.get("page")
+
+            # rich bibliographic info
+            author = _first_author(meta)
+            citation = _journal_citation(meta)  # title, journal, vol(issue), pages, year
+
+            # Build the line:
+            line = f"**{i}. {display_name}**"
+            details = []
+
+            if author or citation:
+                who_what = ", ".join([x for x in [author, citation] if x])
+                if who_what:
+                    details.append(who_what)
+
+            if page:
+                details.append(f"p. {page}")
+            if score is not None:
+                details.append(f"score {score:.3f}")
+
+            if details:
+                line += " — " + " • ".join(details)
+
+            st.markdown(line)                
+                                   

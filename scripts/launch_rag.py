@@ -213,12 +213,39 @@ def main():
             # - Retrieve the chunks with similarity scores
             response_sources = []
             for sn in getattr(response, "source_nodes", []):
+                md = sn.node.metadata or {}
                 response_sources.append({
-                    "node_id": sn.node.node_id,
                     "score": sn.score,                     # similarity score
-                    "text": sn.node.get_content(),
-                    **(sn.node.metadata or {}),            # file_path, page_label, etc.
+                    "file_path": md.get("file_path"),
+                    "file_name": md.get("file_name"),
+                    "page_label": md.get("page_label"),
+                    # pass through biblio fields if you have them:
+                    "title": md.get("title"),
+                    "paper_title": md.get("paper_title"),
+                    "document_title": md.get("document_title"),
+                    "authors": md.get("authors"),
+                    "author": md.get("author"),
+                    "first_author": md.get("first_author"),
+                    "journal": md.get("journal"),
+                    "journal_name": md.get("journal_name"),
+                    "container_title": md.get("container_title"),
+                    "publication": md.get("publication"),
+                    "volume": md.get("volume"),
+                    "issue": md.get("issue"),
+                    "number": md.get("number"),
+                    "pages": md.get("pages"),
+                    "page": md.get("page"),
+                    "year": md.get("year"),
+                    "pub_year": md.get("pub_year"),
+                    "date": md.get("date"),
                 })
+                
+                #response_sources.append({
+                #    "node_id": sn.node.node_id,
+                #    "score": sn.score,                     # similarity score
+                #    "text": sn.node.get_content(),
+                #    **(sn.node.metadata or {}),            # file_path, page_label, etc.
+                #})
 
             print("response_sources")
             print(response_sources)
