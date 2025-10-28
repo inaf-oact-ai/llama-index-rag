@@ -214,7 +214,10 @@ def main():
             response_sources = []
             for sn in getattr(response, "source_nodes", []):
                 md = sn.node.metadata or {}
+                print("--> md")
+                print(md)
                 response_sources.append({
+                    "node_id": sn.node.node_id,
                     "score": sn.score,                     # similarity score
                     "file_path": md.get("file_path"),
                     "file_name": md.get("file_name"),
@@ -238,6 +241,7 @@ def main():
                     "year": md.get("year"),
                     "pub_year": md.get("pub_year"),
                     "date": md.get("date"),
+                    "text": sn.node.get_content(),
                 })
                 
                 #response_sources.append({
