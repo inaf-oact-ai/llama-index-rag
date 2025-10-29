@@ -77,7 +77,7 @@ def ingest(
             good_documents.append(d)
 
     if bad:
-        logging.warning("Skipping %d invalid docs (empty/non-string text). Example: %s", len(bad), bad[0])
+        logger.warning("Skipping %d invalid docs (empty/non-string text). Example: %s", len(bad), bad[0])
 
     # - Create index store
     logger.info("Creating index store ...")
