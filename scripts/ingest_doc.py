@@ -20,6 +20,7 @@ from llama_index.core import (
     VectorStoreIndex,
     Settings,
 )
+from llama_index.core.embeddings import BaseEmbedding
 
 # - Import qdrant modules
 import qdrant_client
@@ -36,7 +37,8 @@ def ingest(
     embedder,
     qdrant_url,
     file_exts=[".pdf"],
-    recursive=True
+    recursive=True,
+    skip_baddoc=False
 ):
     """ Method to ingest paper in DB """
     logger.info("Indexing data...")
@@ -49,12 +51,43 @@ def ingest(
     )
     storage_context = StorageContext.from_defaults(vector_store=qdrant_vector_store)
 
+
+    # - Validate docs
+    # 1) Helper to extract safe text from any LlamaIndex object
+    def get_text_safe(obj):
+        # Documents have .text; Nodes have get_content(...)
+        t = None
+        if hasattr(obj, "get_content"):
+            try:
+                t = obj.get_content(metadata_mode="none")
+            except Exception:
+                t = None
+        if t is None:
+            t = getattr(obj, "text", None)
+        return t if isinstance(t, str) else None
+
+    # 2) Validate & filter documents
+    bad = []
+    good_documents = []
+    for i, d in enumerate(documents):
+        t = get_text_safe(d)
+        if t is None or not t.strip():
+            bad.append((i, getattr(d, "id_", None), getattr(d, "metadata", {})))
+        else:
+            good_documents.append(d)
+
+    if bad:
+        logging.warning("Skipping %d invalid docs (empty/non-string text). Example: %s", len(bad), bad[0])
+
+    # - Create index store
     logger.info("Creating index store ...")
     Settings.llm = None
     Settings.embed_model = embedder
     Settings.chunk_size = chunk_size
     index = VectorStoreIndex.from_documents(
-        documents, storage_context=storage_context, Settings=Settings
+        good_documents if skip_baddoc else documents, 
+        storage_context=storage_context, 
+        Settings=Settings
     )
     logger.info(
        "Data indexed successfully to Qdrant",
@@ -79,6 +112,8 @@ def main():
     parser.set_defaults(recursive=False)
     parser.add_argument("-file_exts", "--file_exts", dest="file_exts", required=False, type=str, default='.pdf', action='store', help='Required file extensions, separated by commas')
     parser.add_argument("-chunk_size", "--chunk_size", type=int, required=False, default=1024, help="Document chunk size")
+    parser.add_argument("--skip_baddoc", dest="skip_baddoc", action='store_true',help='Skip bad documents (default=False)')	
+    parser.set_defaults(skip_baddoc=False)
     
     # - Model options
     parser.add_argument("-embedding_model", "--embedding_model", type=str, required=False, default="mixedbread-ai/mxbai-embed-large-v1", help="Embedder model")
@@ -117,7 +152,8 @@ def main():
         embedder=embed_model,
         qdrant_url=args.qdrant_url,
         file_exts=args.file_exts,
-        recursive=args.recursive
+        recursive=args.recursive,
+        skip_baddoc=args.skip_baddoc
     )
     
     logger.info("Ingest completed.")
