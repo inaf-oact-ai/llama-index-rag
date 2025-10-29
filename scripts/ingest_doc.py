@@ -94,28 +94,28 @@ def ingest(
         documents_to_be_stored= good_documents 
         
     # - Create Safe embedder wrapper to ignore/guard bad strings
-    class SafeEmbedder(BaseEmbedding):
-        def __init__(self, inner):
-            self.inner = inner
-        def _flt(self, texts):
-            return [t for t in texts if isinstance(t, str) and t.strip()]
-        def embed_documents(self, texts):
-            texts = self._flt(texts)
-            if not texts:
-                return []
-            return self.inner.embed_documents(texts)
-        def embed_query(self, text):
-            if not isinstance(text, str) or not text.strip():
-                raise ValueError("Query text is empty or not a string")
-            return self.inner.embed_query(text)
+    #class SafeEmbedder(BaseEmbedding):
+    #    def __init__(self, inner):
+    #        self.inner = inner
+    #    def _flt(self, texts):
+    #        return [t for t in texts if isinstance(t, str) and t.strip()]
+    #    def embed_documents(self, texts):
+    #        texts = self._flt(texts)
+    #        if not texts:
+    #            return []
+    #        return self.inner.embed_documents(texts)
+    #    def embed_query(self, text):
+    #        if not isinstance(text, str) or not text.strip():
+    #            raise ValueError("Query text is empty or not a string")
+    #        return self.inner.embed_query(text)
 
-    safe_embedder = SafeEmbedder(embedder)
+    #safe_embedder = SafeEmbedder(embedder)
     
-    service_context = ServiceContext.from_defaults(
-        llm=None,
-        embed_model=safe_embedder,
-        chunk_size=chunk_size,
-    )
+    #service_context = ServiceContext.from_defaults(
+    #    llm=None,
+    #    embed_model=safe_embedder,
+    #    chunk_size=chunk_size,
+    #)
     
     logger.info("doc types: %s", {type(d) for d in documents_to_be_stored})
     
@@ -123,8 +123,8 @@ def ingest(
     index = VectorStoreIndex.from_documents(
         documents_to_be_stored, 
         storage_context=storage_context, 
-        #Settings=Settings,
-        service_context=service_context
+        Settings=Settings,
+        #service_context=service_context
     )
     logger.info(
        "Data indexed successfully to Qdrant",
