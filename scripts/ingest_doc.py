@@ -77,15 +77,23 @@ def ingest(
             good_documents.append(d)
 
     if bad:
-        logger.warning("Skipping %d invalid docs (empty/non-string text). Example: %s", len(bad), bad[0])
+        logger.warning("%d bad/invalid docs (empty/non-string text) found. Example: %s", len(bad), bad[0])
+
+    logger.info(f"#good/tot={len(good_documents)}/{len(documents)} documents to be stored ...")
 
     # - Create index store
     logger.info("Creating index store ...")
     Settings.llm = None
     Settings.embed_model = embedder
     Settings.chunk_size = chunk_size
+    
+    documents_to_be_stored= documents
+    if skip_baddoc:
+        logger.info("Storing only good documents (N={len(good_documents)}) ...")
+        documents_to_be_stored= good_documents 
+        
     index = VectorStoreIndex.from_documents(
-        good_documents if skip_baddoc else documents, 
+        documents_to_be_stored, 
         storage_context=storage_context, 
         Settings=Settings
     )
