@@ -9,7 +9,8 @@ import argparse
 import os
 import sys
 import structlog
-from typing import List, Iterable, Optional
+from typing import List, Iterable, Optional, Any
+from pydantic import PrivateAttr
 
 # - Import llama-index modules
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -35,9 +36,11 @@ logger = structlog.get_logger()
 #############################
 class SafeEmbedder(BaseEmbedding):
     """Guards against non-string/blank inputs and delegates to an inner embedder."""
-    def __init__(self, inner):
-        super().__init__()
-        self.inner = inner  # e.g., HuggingFaceEmbedding / SentenceTransformerEmbedding
+    _inner: Any = PrivateAttr()
+
+    def __init__(self, inner: Any):
+        super().__init__()           # important for Pydantic
+        self._inner = inner          # store wrapped embedder privately
 
     # ------- helpers -------
     @staticmethod
@@ -48,38 +51,36 @@ class SafeEmbedder(BaseEmbedding):
     def _flt(cls, texts: Iterable[Optional[str]]) -> List[str]:
         return [t for t in texts if cls._ok(t)]
 
-    # ------- public API (keep these for robustness) -------
+    # ------- public API (batch + single) -------
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         texts = self._flt(texts)
         if not texts:
             return []
-        return self.inner.embed_documents(texts)
+        return self._inner.embed_documents(texts)
 
     def embed_query(self, text: str) -> List[float]:
         if not self._ok(text):
             raise ValueError("Query text is empty or not a string")
-        return self.inner.embed_query(text)
+        return self._inner.embed_query(text)
 
-    # ------- abstract methods required by BaseEmbedding -------
-    # Single items
+    # ------- abstract hooks BaseEmbedding may call -------
+    # single text
     def _get_text_embedding(self, text: str) -> List[float]:
         if not self._ok(text):
             raise ValueError("Text is empty or not a string")
-        # Delegate via batch to keep behavior identical to inner
-        return self.inner.embed_documents([text])[0]
+        return self._inner.embed_documents([text])[0]
 
     def _get_query_embedding(self, query: str) -> List[float]:
         if not self._ok(query):
             raise ValueError("Query is empty or not a string")
-        return self.inner.embed_query(query)
+        return self._inner.embed_query(query)
 
-    # Batches (some LI versions call these; implement to be safe)
+    # batches
     def _get_text_embedding_batch(self, texts: List[str]) -> List[List[float]]:
         return self.embed_documents(texts)
 
-    # Async variants (some LI versions require these)
+    # async (make sync fallbacks; if your inner has async, you can await it)
     async def _aget_query_embedding(self, query: str) -> List[float]:
-        # simple sync delegate; replace with await inner.aget_query_embedding if available
         return self._get_query_embedding(query)
 
     async def _aget_text_embedding(self, text: str) -> List[float]:
