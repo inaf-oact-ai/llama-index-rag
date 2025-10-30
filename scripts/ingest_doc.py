@@ -9,6 +9,7 @@ import argparse
 import os
 import sys
 import structlog
+from typing import List, Iterable, Optional
 
 # - Import llama-index modules
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -28,6 +29,65 @@ import qdrant_client
 
 logger = structlog.get_logger()
 
+
+#############################
+##  HELPER CLASSES
+#############################
+class SafeEmbedder(BaseEmbedding):
+    """Guards against non-string/blank inputs and delegates to an inner embedder."""
+    def __init__(self, inner):
+        super().__init__()
+        self.inner = inner  # e.g., HuggingFaceEmbedding / SentenceTransformerEmbedding
+
+    # ------- helpers -------
+    @staticmethod
+    def _ok(s: Optional[str]) -> bool:
+        return isinstance(s, str) and bool(s.strip())
+
+    @classmethod
+    def _flt(cls, texts: Iterable[Optional[str]]) -> List[str]:
+        return [t for t in texts if cls._ok(t)]
+
+    # ------- public API (keep these for robustness) -------
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        texts = self._flt(texts)
+        if not texts:
+            return []
+        return self.inner.embed_documents(texts)
+
+    def embed_query(self, text: str) -> List[float]:
+        if not self._ok(text):
+            raise ValueError("Query text is empty or not a string")
+        return self.inner.embed_query(text)
+
+    # ------- abstract methods required by BaseEmbedding -------
+    # Single items
+    def _get_text_embedding(self, text: str) -> List[float]:
+        if not self._ok(text):
+            raise ValueError("Text is empty or not a string")
+        # Delegate via batch to keep behavior identical to inner
+        return self.inner.embed_documents([text])[0]
+
+    def _get_query_embedding(self, query: str) -> List[float]:
+        if not self._ok(query):
+            raise ValueError("Query is empty or not a string")
+        return self.inner.embed_query(query)
+
+    # Batches (some LI versions call these; implement to be safe)
+    def _get_text_embedding_batch(self, texts: List[str]) -> List[List[float]]:
+        return self.embed_documents(texts)
+
+    # Async variants (some LI versions require these)
+    async def _aget_query_embedding(self, query: str) -> List[float]:
+        # simple sync delegate; replace with await inner.aget_query_embedding if available
+        return self._get_query_embedding(query)
+
+    async def _aget_text_embedding(self, text: str) -> List[float]:
+        return self._get_text_embedding(text)
+
+    async def _aget_text_embedding_batch(self, texts: List[str]) -> List[List[float]]:
+        return self._get_text_embedding_batch(texts)
+        
 #############################
 ##  HELPER METHODS
 #############################
@@ -39,7 +99,8 @@ def ingest(
     qdrant_url,
     file_exts=[".pdf"],
     recursive=True,
-    skip_baddoc=False
+    skip_baddoc=False,
+    use_safe_embedder=False
 ):
     """ Method to ingest paper in DB """
     logger.info("Indexing data...")
@@ -93,39 +154,36 @@ def ingest(
         logger.info(f"Storing only good documents (N={len(good_documents)}) ...")
         documents_to_be_stored= good_documents 
         
-    # - Create Safe embedder wrapper to ignore/guard bad strings
-    #class SafeEmbedder(BaseEmbedding):
-    #    def __init__(self, inner):
-    #        self.inner = inner
-    #    def _flt(self, texts):
-    #        return [t for t in texts if isinstance(t, str) and t.strip()]
-    #    def embed_documents(self, texts):
-    #        texts = self._flt(texts)
-    #        if not texts:
-    #            return []
-    #        return self.inner.embed_documents(texts)
-    #    def embed_query(self, text):
-    #        if not isinstance(text, str) or not text.strip():
-    #            raise ValueError("Query text is empty or not a string")
-    #        return self.inner.embed_query(text)
-
-    #safe_embedder = SafeEmbedder(embedder)
-    
-    #service_context = ServiceContext.from_defaults(
-    #    llm=None,
-    #    embed_model=safe_embedder,
-    #    chunk_size=chunk_size,
-    #)
-    
     logger.info("doc types: %s", {type(d) for d in documents_to_be_stored})
+        
+    # - Create Safe embedder wrapper to ignore/guard bad strings
+    if use_safe_embedder:
+        logger.info("Creating safe embedder ...")
+        safe_embedder = SafeEmbedder(embedder)
     
-    # - Store documents    
-    index = VectorStoreIndex.from_documents(
-        documents_to_be_stored, 
-        storage_context=storage_context, 
-        Settings=Settings,
-        #service_context=service_context
-    )
+        logger.info("Creating service context ...")
+        service_context = ServiceContext.from_defaults(
+            llm=None,
+            embed_model=safe_embedder,
+            chunk_size=chunk_size,
+        )
+
+        # - Store documents
+        logger.info("Storing documents ...")
+        index = VectorStoreIndex.from_documents(
+            documents_to_be_stored,
+            storage_context=storage_context,
+            service_context=service_context,
+        )
+    else:
+        # - Store documents   
+        logger.info("Storing documents ...") 
+        index = VectorStoreIndex.from_documents(
+            documents_to_be_stored, 
+            storage_context=storage_context, 
+            Settings=Settings,
+        )
+    
     logger.info(
        "Data indexed successfully to Qdrant",
        collection=collection_name,
@@ -157,6 +215,8 @@ def main():
     #parser.add_argument("-embedding_model", "--embedding_model", type=str, required=False, default="sentence-transformers/all-mpnet-base-v2", help="Embedder model")
     #parser.add_argument("-embedding_model", "--embedding_model", type=str, required=False, default="Qwen/Qwen3-Embedding-8B", help="Embedder model")
     #parser.add_argument("-embedding_model", "--embedding_model", type=str, required=False, default="nvidia/llama-embed-nemotron-8b", help="Embedder model")
+    parser.add_argument("--use_safe_embedder", dest="use_safe_embedder", action='store_true',help='Use safe embedder (in case of upload errors) (default=False)')	
+    parser.set_defaults(use_safe_embedder=False)
     
     # - Storage options
     parser.add_argument("-qdrant_url", "--qdrant_url", type=str, required=False, default="http://localhost:6333", help="QDRant URL")
@@ -190,7 +250,8 @@ def main():
         qdrant_url=args.qdrant_url,
         file_exts=args.file_exts,
         recursive=args.recursive,
-        skip_baddoc=args.skip_baddoc
+        skip_baddoc=args.skip_baddoc,
+        use_safe_embedder=args.use_safe_embedder,
     )
     
     logger.info("Ingest completed.")
