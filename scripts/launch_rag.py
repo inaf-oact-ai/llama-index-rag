@@ -104,6 +104,8 @@ def load_args():
     parser.add_argument("-llm_ctx_window", "--llm_ctx_window", type=int, required=False, default=4096, help="LLM context window")
     parser.add_argument("-llm_timeout", "--llm_timeout", type=int, required=False, default=120, help="LLM response timeout in seconds")
     parser.add_argument("-llm_keep_alive", "--llm_keep_alive", type=str, required=False, default="0s", help="LLM keep alive model option. 0s means loaded for all the time duration. 1h means active for 1h")
+    parser.add_argument("--llm_thinking", dest="llm_thinking", action='store_true',help='Enable LLM thinking (default=False)')	
+    parser.set_defaults(llm_thinking=False)
     parser.add_argument("-qdrant_url", "--qdrant_url", type=str, required=False, default="http://localhost:6333", help="QDRant URL")
 
     logger.info("Parsing arguments ...")
@@ -129,7 +131,7 @@ def main():
       request_timeout=args.llm_timeout,
       context_window=args.llm_ctx_window,
       keep_alive=args.llm_keep_alive,
-      #thinking=True,
+      thinking=args.llm_thinking,
       #additional_kwargs={
       #    "num_ctx": 4096,
       #    "num_batch": 128
