@@ -144,11 +144,6 @@ def ingest(
 
     logger.info(f"#good/tot={len(good_documents)}/{len(documents)} documents to be stored ...")
 
-    # - Create index store
-    logger.info("Creating index store ...")
-    Settings.llm = None
-    Settings.embed_model = embedder
-    Settings.chunk_size = chunk_size
     
     documents_to_be_stored= documents
     if skip_baddoc:
@@ -162,21 +157,33 @@ def ingest(
         logger.info("Creating safe embedder ...")
         safe_embedder = SafeEmbedder(embedder)
     
-        logger.info("Creating service context ...")
-        service_context = ServiceContext.from_defaults(
-            llm=None,
-            embed_model=safe_embedder,
-            chunk_size=chunk_size,
-        )
+        #logger.info("Creating service context ...")
+        #service_context = ServiceContext.from_defaults(
+        #    llm=None,
+        #    embed_model=safe_embedder,
+        #    chunk_size=chunk_size,
+        #)
+        
+        # - Create settings
+        logger.info("Creating settings ...")
+        Settings.llm = None
+        Settings.embed_model = safe_embedder
+        Settings.chunk_size = chunk_size
 
         # - Store documents
         logger.info("Storing documents ...")
         index = VectorStoreIndex.from_documents(
             documents_to_be_stored,
             storage_context=storage_context,
-            service_context=service_context,
+            Settings=Settings,
         )
     else:
+        # - Create settings
+        logger.info("Creating settings ...")
+        Settings.llm = None
+        Settings.embed_model = embedder
+        Settings.chunk_size = chunk_size
+    
         # - Store documents   
         logger.info("Storing documents ...") 
         index = VectorStoreIndex.from_documents(
