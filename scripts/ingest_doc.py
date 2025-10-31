@@ -71,66 +71,84 @@ class SafeEmbedder(BaseEmbedding):
         return fixed
 
     # ---- delegation helpers ----
-    def _delegate_text_batch(self, texts: List[str]) -> List[List[float]]:
-        if hasattr(self._inner, "get_text_embedding_batch"):
-            return self._inner.get_text_embedding_batch(texts)
-        if hasattr(self._inner, "get_text_embedding"):
-            return [self._inner.get_text_embedding(t) for t in texts]
-        if hasattr(self._inner, "embed_documents"):
-            return self._inner.embed_documents(texts)
-        if hasattr(self._inner, "encode"):
-            return self._inner.encode(texts, convert_to_numpy=False)
+    def _delegate_text_batch(self, texts: List[str], **kwargs) -> List[List[float]]:
+        inner = self._inner
+        if hasattr(inner, "get_text_embedding_batch"):
+            try:
+                return inner.get_text_embedding_batch(texts, **kwargs)
+            except TypeError:
+                return inner.get_text_embedding_batch(texts)
+        if hasattr(inner, "get_text_embedding"):
+            return [inner.get_text_embedding(t) for t in texts]
+        if hasattr(inner, "embed_documents"):
+            try:
+                return inner.embed_documents(texts, **kwargs)
+            except TypeError:
+                return inner.embed_documents(texts)
+        if hasattr(inner, "encode"):
+            # sentence-transformers .encode ignores extra kwargs we don't pass
+            return inner.encode(texts, convert_to_numpy=False)
         raise AttributeError("Inner embedder lacks a compatible batch method")
 
-    def _delegate_text_single(self, text: str) -> List[float]:
-        if hasattr(self._inner, "get_text_embedding"):
-            return self._inner.get_text_embedding(text)
-        if hasattr(self._inner, "get_text_embedding_batch"):
-            return self._inner.get_text_embedding_batch([text])[0]
-        if hasattr(self._inner, "embed_documents"):
-            return self._inner.embed_documents([text])[0]
-        if hasattr(self._inner, "encode"):
-            return self._inner.encode([text], convert_to_numpy=False)[0]
+    def _delegate_text_single(self, text: str, **kwargs) -> List[float]:
+        inner = self._inner
+        if hasattr(inner, "get_text_embedding"):
+            try:
+                return inner.get_text_embedding(text, **kwargs)
+            except TypeError:
+                return inner.get_text_embedding(text)
+        if hasattr(inner, "get_text_embedding_batch"):
+            return self._delegate_text_batch([text], **kwargs)[0]
+        if hasattr(inner, "embed_documents"):
+            try:
+                return inner.embed_documents([text], **kwargs)[0]
+            except TypeError:
+                return inner.embed_documents([text])[0]
+        if hasattr(inner, "encode"):
+            return inner.encode([text], convert_to_numpy=False)[0]
         raise AttributeError("Inner embedder lacks a compatible single-text method")
 
-    def _delegate_query_single(self, query: str) -> List[float]:
-        if hasattr(self._inner, "get_query_embedding"):
-            return self._inner.get_query_embedding(query)
-        return self._delegate_text_single(query)
+    def _delegate_query_single(self, query: str, **kwargs) -> List[float]:
+        inner = self._inner
+        if hasattr(inner, "get_query_embedding"):
+            try:
+                return inner.get_query_embedding(query, **kwargs)
+            except TypeError:
+                return inner.get_query_embedding(query)
+        return self._delegate_text_single(query, **kwargs)
 
     # ---- PUBLIC methods (sanitize here too) ----
-    def get_text_embedding_batch(self, texts: List[Any]) -> List[List[float]]:
+    def get_text_embedding_batch(self, texts: List[Any], **kwargs) -> List[List[float]]:
         texts = self._coerce_batch(texts)
-        return self._delegate_text_batch(texts)
+        return self._delegate_text_batch(texts, **kwargs)
 
-    def get_text_embedding(self, text: Any) -> List[float]:
+    def get_text_embedding(self, text: Any, **kwargs) -> List[float]:
         text = self._coerce_one(text) or " "
-        return self._delegate_text_single(text)
+        return self._delegate_text_single(text, **kwargs)
 
-    def get_query_embedding(self, query: Any) -> List[float]:
+    def get_query_embedding(self, query: Any, **kwargs) -> List[float]:
         query = self._coerce_one(query) or " "
-        return self._delegate_query_single(query)
+        return self._delegate_query_single(query, **kwargs)
 
     # ---- protected hooks (still implement for safety) ----
-    def _get_text_embedding_batch(self, texts: List[Any]) -> List[List[float]]:
-        return self.get_text_embedding_batch(texts)
+    def _get_text_embedding_batch(self, texts: List[Any], **kwargs) -> List[List[float]]:
+        return self.get_text_embedding_batch(texts, **kwargs)
 
-    def _get_text_embedding(self, text: Any) -> List[float]:
-        return self.get_text_embedding(text)
+    def _get_text_embedding(self, text: Any, **kwargs) -> List[float]:
+        return self.get_text_embedding(text, **kwargs)
 
-    def _get_query_embedding(self, query: Any) -> List[float]:
-        return self.get_query_embedding(query)
+    def _get_query_embedding(self, query: Any, **kwargs) -> List[float]:
+        return self.get_query_embedding(query, **kwargs)
 
     # ---- async shims ----
-    async def _aget_text_embedding_batch(self, texts: List[Any]) -> List[List[float]]:
-        return self.get_text_embedding_batch(texts)
+    async def _aget_text_embedding_batch(self, texts: List[Any], **kwargs) -> List[List[float]]:
+        return self.get_text_embedding_batch(texts, **kwargs)
 
-    async def _aget_text_embedding(self, text: Any) -> List[float]:
-        return self.get_text_embedding(text)
+    async def _aget_text_embedding(self, text: Any, **kwargs) -> List[float]:
+        return self.get_text_embedding(text, **kwargs)
 
-    async def _aget_query_embedding(self, query: Any) -> List[float]:
-        return self.get_query_embedding(query)
-   
+    async def _aget_query_embedding(self, query: Any, **kwargs) -> List[float]:
+        return self.get_query_embedding(query, **kwargs)
 
 
 def build_index_from_nodes(nodes, storage_context):
