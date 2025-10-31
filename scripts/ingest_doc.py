@@ -11,6 +11,7 @@ import sys
 import structlog
 from typing import List, Iterable, Optional, Any
 from pydantic import PrivateAttr
+import traceback
 
 # - Import llama-index modules
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -129,6 +130,28 @@ class SafeEmbedder(BaseEmbedding):
 
     async def _aget_query_embedding(self, query: Any) -> List[float]:
         return self.get_query_embedding(query)
+   
+
+
+def build_index_from_nodes(nodes, storage_context):
+    use_from_nodes = hasattr(VectorStoreIndex, "from_nodes")
+    def builder():
+        if use_from_nodes:
+            return VectorStoreIndex.from_nodes(nodes, storage_context=storage_context)
+        return VectorStoreIndex(nodes, storage_context=storage_context)
+
+    try:
+        return builder()
+    except Exception as e:
+        logger.error(
+            "Index build failed (api=%s). nodes=%d; first_text_len=%s; embedder=%s\n%s",
+            "from_nodes" if use_from_nodes else "ctor",
+            len(nodes),
+            (len(nodes[0].get_content()) if nodes else None),
+            type(Settings.embed_model).__name__,
+            traceback.format_exc(),
+        )
+        raise   
         
 #############################
 ##  HELPER METHODS
@@ -251,13 +274,13 @@ def ingest(
         logger.info("embedder=%s", type(Settings.embed_model).__name__)
 
         # - Define method to store index
-        def build_index_from_nodes(nodes, storage_context):
-            try:
-                # Newer API (?)
-                return VectorStoreIndex.from_nodes(nodes, storage_context=storage_context)
-            except Exception as e:
-                logger.warning(f"VectorStoreIndex.from_nodes failed (err={str(e)}), trying an alternative method ...")
-                return VectorStoreIndex(nodes, storage_context=storage_context)
+        #def build_index_from_nodes(nodes, storage_context):
+        #    try:
+        #        # Newer API (?)
+        #        return VectorStoreIndex.from_nodes(nodes, storage_context=storage_context)
+        #    except Exception as e:
+        #        logger.warning(f"VectorStoreIndex.from_nodes failed (err={str(e)}), trying an alternative method ...")
+        #        return VectorStoreIndex(nodes, storage_context=storage_context)
 
         # - Check embedder
         assert type(Settings.embed_model).__name__ == "SafeEmbedder", \
