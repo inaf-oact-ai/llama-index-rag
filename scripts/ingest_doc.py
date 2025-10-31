@@ -196,12 +196,11 @@ def ingest(
         logger.info("Creating safe embedder ...")
         safe_embedder = SafeEmbedder(embedder)
     
-        
         # - Create settings
-        #logger.info("Creating settings ...")
-        #Settings.llm = None
-        #Settings.embed_model = safe_embedder
-        #Settings.chunk_size = chunk_size
+        logger.info("Creating settings ...")
+        Settings.llm = None
+        Settings.embed_model = safe_embedder
+        Settings.chunk_size = chunk_size
 
         # - Store documents
         #logger.info("Storing documents ...")
@@ -211,56 +210,50 @@ def ingest(
         #    Settings=Settings,
         #)
         
-        with Settings.context(llm=None, embed_model=safe_embedder, chunk_size=chunk_size):
-            # - Creating splitter
-            logger.info("Creating sentence splitter ...")
-            splitter = SentenceSplitter(chunk_size=chunk_size)
+        # - Creating splitter
+        logger.info("Creating sentence splitter ...")
+        splitter = SentenceSplitter(chunk_size=chunk_size)
             
-            # - Get nodes from documents
-            logger.info("Getting nodes from documents ...")
-            nodes = splitter.get_nodes_from_documents(documents_to_be_stored)
+        # - Get nodes from documents
+        logger.info("Getting nodes from documents ...")
+        nodes = splitter.get_nodes_from_documents(documents_to_be_stored)
 
-            def node_text(n):
+        def node_text(n):
+            try:
+                return n.get_content(metadata_mode="none")
+            except Exception:
+                return None
+
+        # - Selecting good nodes
+        logger.info("Selecting good nodes ...")
+        clean_nodes = []
+        bad_nodes = []
+        for n in nodes:
+            t = node_text(n)
+            # Also repair bytes → str
+            if isinstance(t, bytes):
                 try:
-                    return n.get_content(metadata_mode="none")
+                    t = t.decode("utf-8", errors="ignore")
+                    n.text = t  # persist the decoded text on the node
                 except Exception:
-                    return None
+                    t = None
+            if isinstance(t, str) and t.strip():
+                clean_nodes.append(n)
+            else:
+                bad_nodes.append(getattr(n, "id_", None))
 
-            # - Selecting good nodes
-            logger.info("Selecting good nodes ...")
-            clean_nodes = []
-            bad_nodes = []
-            for n in nodes:
-                t = node_text(n)
-                # Also repair bytes → str
-                if isinstance(t, bytes):
-                    try:
-                        t = t.decode("utf-8", errors="ignore")
-                        n.text = t  # persist the decoded text on the node
-                    except Exception:
-                        t = None
-                if isinstance(t, str) and t.strip():
-                    clean_nodes.append(n)
-                else:
-                    bad_nodes.append(getattr(n, "id_", None))
+        if bad_nodes:
+            logger.warning("Skipping %d invalid chunks (post-split). Example: %s", len(bad_nodes), bad_nodes[:3])
 
-            if bad_nodes:
-                logger.warning("Skipping %d invalid chunks (post-split). Example: %s", len(bad_nodes), bad_nodes[:3])
+        logger.info("nodes=%d, sample_text_len=%s", len(clean_nodes), len(clean_nodes[0].get_content()) if clean_nodes else None)
+        logger.info("embedder=%s", type(Settings.embed_model).__name__)
 
-            # - Ensure we are using the wrapper
-            logger.info("Sanity check we are using the embedder wrapper ...")
-            assert type(Settings.embed_model).__name__ == "SafeEmbedder", \
-                f"Unexpected embedder: {type(Settings.embed_model)}"
-
-            logger.info("nodes=%d, sample_text_len=%s", len(clean_nodes), len(clean_nodes[0].get_content()) if clean_nodes else None)
-            logger.info("embedder=%s", type(Settings.embed_model).__name__)
-
-            # - Store documents
-            logger.info("Storing documents ...")
-            index = VectorStoreIndex.from_nodes(
-                clean_nodes,
-                storage_context=storage_context,
-            )
+        # - Store documents
+        logger.info("Storing documents ...")
+        index = VectorStoreIndex.from_nodes(
+            clean_nodes,
+            storage_context=storage_context,
+        )
         
         
     else:
