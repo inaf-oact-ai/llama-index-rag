@@ -21,9 +21,10 @@ from llama_index.core import (
     StorageContext,
     VectorStoreIndex,
     Settings,
+    ServiceContext
 )
 from llama_index.core.embeddings import BaseEmbedding
-from llama_index.core import ServiceContext
+from llama_index.core.node_parser import SentenceSplitter
 
 # - Import qdrant modules
 import qdrant_client
@@ -35,33 +36,51 @@ logger = structlog.get_logger()
 ##  HELPER CLASSES
 #############################
 class SafeEmbedder(BaseEmbedding):
-    """Guards against non-string/blank inputs and delegates to inner embedder."""
     _inner: Any = PrivateAttr()
 
     def __init__(self, inner: Any):
         super().__init__()
         self._inner = inner
 
-    # ---------- helpers ----------
+    # ---- helpers ----
     @staticmethod
-    def _ok(s: Optional[str]) -> bool:
-        return isinstance(s, str) and bool(s.strip())
+    def _coerce_one(x: Any) -> Optional[str]:
+        # bytes → utf-8
+        if isinstance(x, bytes):
+            try:
+                x = x.decode("utf-8", errors="ignore")
+            except Exception:
+                return None
+        # keep only non-empty strings
+        if isinstance(x, str) and x.strip():
+            return x
+        return None
 
     @classmethod
-    def _flt(cls, texts: Iterable[Optional[str]]) -> List[str]:
-        return [t for t in texts if cls._ok(t)]
+    def _coerce_batch(cls, texts: Iterable[Any]) -> List[str]:
+        fixed: List[str] = []
+        bad_idx: List[int] = []
+        for i, t in enumerate(texts):
+            ok = cls._coerce_one(t)
+            if ok is None:
+                bad_idx.append(i)
+                fixed.append(" ")  # placeholder to preserve batch length
+            else:
+                fixed.append(ok)
+        if bad_idx:
+            # Only log; do not raise. We’ve sanitized them.
+            # (Use your logger instead of print if you prefer)
+            print(f"[SafeEmbedder] sanitized {len(bad_idx)} items; sample idx: {bad_idx[:5]}")
+        return fixed
 
-    # ---------- delegation helpers ----------
+    # ---- delegation helpers ----
     def _delegate_text_batch(self, texts: List[str]) -> List[List[float]]:
-        """Delegate batch text embeddings to whatever API the inner exposes."""
         if hasattr(self._inner, "get_text_embedding_batch"):
             return self._inner.get_text_embedding_batch(texts)
         if hasattr(self._inner, "get_text_embedding"):
-            # call singly for safety
             return [self._inner.get_text_embedding(t) for t in texts]
         if hasattr(self._inner, "embed_documents"):
             return self._inner.embed_documents(texts)
-        # last resort: a raw SentenceTransformer-like object
         if hasattr(self._inner, "encode"):
             return self._inner.encode(texts, convert_to_numpy=False)
         raise AttributeError("Inner embedder lacks a compatible batch method")
@@ -80,35 +99,34 @@ class SafeEmbedder(BaseEmbedding):
     def _delegate_query_single(self, query: str) -> List[float]:
         if hasattr(self._inner, "get_query_embedding"):
             return self._inner.get_query_embedding(query)
-        # fall back to text embedding if no special query path
         return self._delegate_text_single(query)
 
-    # ---------- BaseEmbedding required hooks ----------
-    def _get_text_embedding(self, text: str) -> List[float]:
-        if not self._ok(text):
-            raise ValueError("Text is empty or not a string")
-        return self._delegate_text_single(text)
-
-    def _get_query_embedding(self, query: str) -> List[float]:
-        if not self._ok(query):
-            raise ValueError("Query is empty or not a string")
-        return self._delegate_query_single(query)
-
-    def _get_text_embedding_batch(self, texts: List[str]) -> List[List[float]]:
-        texts = self._flt(texts)
-        if not texts:
-            return []
+    # ---- BaseEmbedding hooks ----
+    def _get_text_embedding_batch(self, texts: List[Any]) -> List[List[float]]:
+        texts = self._coerce_batch(texts)
         return self._delegate_text_batch(texts)
 
-    # ---------- Async shims ----------
-    async def _aget_query_embedding(self, query: str) -> List[float]:
-        return self._get_query_embedding(query)
+    def _get_text_embedding(self, text: Any) -> List[float]:
+        text = self._coerce_one(text)
+        if text is None:
+            text = " "
+        return self._delegate_text_single(text)
 
-    async def _aget_text_embedding(self, text: str) -> List[float]:
+    def _get_query_embedding(self, query: Any) -> List[float]:
+        query = self._coerce_one(query)
+        if query is None:
+            query = " "
+        return self._delegate_query_single(query)
+
+    # ---- async shims ----
+    async def _aget_text_embedding_batch(self, texts: List[Any]) -> List[List[float]]:
+        return self._get_text_embedding_batch(texts)
+
+    async def _aget_text_embedding(self, text: Any) -> List[float]:
         return self._get_text_embedding(text)
 
-    async def _aget_text_embedding_batch(self, texts: List[str]) -> List[List[float]]:
-        return self._get_text_embedding_batch(texts)
+    async def _aget_query_embedding(self, query: Any) -> List[float]:
+        return self._get_query_embedding(query)
         
 #############################
 ##  HELPER METHODS
@@ -178,26 +196,70 @@ def ingest(
         logger.info("Creating safe embedder ...")
         safe_embedder = SafeEmbedder(embedder)
     
-        #logger.info("Creating service context ...")
-        #service_context = ServiceContext.from_defaults(
-        #    llm=None,
-        #    embed_model=safe_embedder,
-        #    chunk_size=chunk_size,
-        #)
         
         # - Create settings
-        logger.info("Creating settings ...")
-        Settings.llm = None
-        Settings.embed_model = safe_embedder
-        Settings.chunk_size = chunk_size
+        #logger.info("Creating settings ...")
+        #Settings.llm = None
+        #Settings.embed_model = safe_embedder
+        #Settings.chunk_size = chunk_size
 
         # - Store documents
-        logger.info("Storing documents ...")
-        index = VectorStoreIndex.from_documents(
-            documents_to_be_stored,
-            storage_context=storage_context,
-            Settings=Settings,
-        )
+        #logger.info("Storing documents ...")
+        #index = VectorStoreIndex.from_documents(
+        #    documents_to_be_stored,
+        #    storage_context=storage_context,
+        #    Settings=Settings,
+        #)
+        
+        with Settings.context(llm=None, embed_model=safe_embedder, chunk_size=chunk_size):
+            # - Creating splitter
+            logger.info("Creating sentence splitter ...")
+            splitter = SentenceSplitter(chunk_size=chunk_size)
+            
+            # - Get nodes from documents
+            logger.info("Getting nodes from documents ...")
+            nodes = splitter.get_nodes_from_documents(documents_to_be_stored)
+
+            def node_text(n):
+                try:
+                    return n.get_content(metadata_mode="none")
+                except Exception:
+                    return None
+
+            # - Selecting good nodes
+            logger.info("Selecting good nodes ...")
+            clean_nodes = []
+            bad_nodes = []
+            for n in nodes:
+                t = node_text(n)
+                # Also repair bytes → str
+                if isinstance(t, bytes):
+                    try:
+                        t = t.decode("utf-8", errors="ignore")
+                        n.text = t  # persist the decoded text on the node
+                    except Exception:
+                        t = None
+                if isinstance(t, str) and t.strip():
+                    clean_nodes.append(n)
+                else:
+                    bad_nodes.append(getattr(n, "id_", None))
+
+            if bad_nodes:
+                logger.warning("Skipping %d invalid chunks (post-split). Example: %s", len(bad_nodes), bad_nodes[:3])
+
+            # - Ensure we are using the wrapper
+            logger.info("Sanity check we are using the embedder wrapper ...")
+            assert type(Settings.embed_model).__name__ == "SafeEmbedder", \
+                f"Unexpected embedder: {type(Settings.embed_model)}"
+
+            # - Store documents
+            logger.info("Storing documents ...")
+            index = VectorStoreIndex.from_nodes(
+                clean_nodes,
+                storage_context=storage_context,
+            )
+        
+        
     else:
         # - Create settings
         logger.info("Creating settings ...")
