@@ -35,14 +35,14 @@ logger = structlog.get_logger()
 ##  HELPER CLASSES
 #############################
 class SafeEmbedder(BaseEmbedding):
-    """Guards against non-string/blank inputs and delegates to an inner embedder."""
+    """Guards against non-string/blank inputs and delegates to inner embedder."""
     _inner: Any = PrivateAttr()
 
     def __init__(self, inner: Any):
-        super().__init__()           # important for Pydantic
-        self._inner = inner          # store wrapped embedder privately
+        super().__init__()
+        self._inner = inner
 
-    # ------- helpers -------
+    # ---------- helpers ----------
     @staticmethod
     def _ok(s: Optional[str]) -> bool:
         return isinstance(s, str) and bool(s.strip())
@@ -51,35 +51,56 @@ class SafeEmbedder(BaseEmbedding):
     def _flt(cls, texts: Iterable[Optional[str]]) -> List[str]:
         return [t for t in texts if cls._ok(t)]
 
-    # ------- public API (batch + single) -------
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        texts = self._flt(texts)
-        if not texts:
-            return []
-        return self._inner.embed_documents(texts)
+    # ---------- delegation helpers ----------
+    def _delegate_text_batch(self, texts: List[str]) -> List[List[float]]:
+        """Delegate batch text embeddings to whatever API the inner exposes."""
+        if hasattr(self._inner, "get_text_embedding_batch"):
+            return self._inner.get_text_embedding_batch(texts)
+        if hasattr(self._inner, "get_text_embedding"):
+            # call singly for safety
+            return [self._inner.get_text_embedding(t) for t in texts]
+        if hasattr(self._inner, "embed_documents"):
+            return self._inner.embed_documents(texts)
+        # last resort: a raw SentenceTransformer-like object
+        if hasattr(self._inner, "encode"):
+            return self._inner.encode(texts, convert_to_numpy=False)
+        raise AttributeError("Inner embedder lacks a compatible batch method")
 
-    def embed_query(self, text: str) -> List[float]:
-        if not self._ok(text):
-            raise ValueError("Query text is empty or not a string")
-        return self._inner.embed_query(text)
+    def _delegate_text_single(self, text: str) -> List[float]:
+        if hasattr(self._inner, "get_text_embedding"):
+            return self._inner.get_text_embedding(text)
+        if hasattr(self._inner, "get_text_embedding_batch"):
+            return self._inner.get_text_embedding_batch([text])[0]
+        if hasattr(self._inner, "embed_documents"):
+            return self._inner.embed_documents([text])[0]
+        if hasattr(self._inner, "encode"):
+            return self._inner.encode([text], convert_to_numpy=False)[0]
+        raise AttributeError("Inner embedder lacks a compatible single-text method")
 
-    # ------- abstract hooks BaseEmbedding may call -------
-    # single text
+    def _delegate_query_single(self, query: str) -> List[float]:
+        if hasattr(self._inner, "get_query_embedding"):
+            return self._inner.get_query_embedding(query)
+        # fall back to text embedding if no special query path
+        return self._delegate_text_single(query)
+
+    # ---------- BaseEmbedding required hooks ----------
     def _get_text_embedding(self, text: str) -> List[float]:
         if not self._ok(text):
             raise ValueError("Text is empty or not a string")
-        return self._inner.embed_documents([text])[0]
+        return self._delegate_text_single(text)
 
     def _get_query_embedding(self, query: str) -> List[float]:
         if not self._ok(query):
             raise ValueError("Query is empty or not a string")
-        return self._inner.embed_query(query)
+        return self._delegate_query_single(query)
 
-    # batches
     def _get_text_embedding_batch(self, texts: List[str]) -> List[List[float]]:
-        return self.embed_documents(texts)
+        texts = self._flt(texts)
+        if not texts:
+            return []
+        return self._delegate_text_batch(texts)
 
-    # async (make sync fallbacks; if your inner has async, you can await it)
+    # ---------- Async shims ----------
     async def _aget_query_embedding(self, query: str) -> List[float]:
         return self._get_query_embedding(query)
 
