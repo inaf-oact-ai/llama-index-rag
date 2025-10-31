@@ -45,13 +45,11 @@ class SafeEmbedder(BaseEmbedding):
     # ---- helpers ----
     @staticmethod
     def _coerce_one(x: Any) -> Optional[str]:
-        # bytes → utf-8
         if isinstance(x, bytes):
             try:
                 x = x.decode("utf-8", errors="ignore")
             except Exception:
                 return None
-        # keep only non-empty strings
         if isinstance(x, str) and x.strip():
             return x
         return None
@@ -64,12 +62,10 @@ class SafeEmbedder(BaseEmbedding):
             ok = cls._coerce_one(t)
             if ok is None:
                 bad_idx.append(i)
-                fixed.append(" ")  # placeholder to preserve batch length
+                fixed.append(" ")  # preserve batch length
             else:
                 fixed.append(ok)
         if bad_idx:
-            # Only log; do not raise. We’ve sanitized them.
-            # (Use your logger instead of print if you prefer)
             print(f"[SafeEmbedder] sanitized {len(bad_idx)} items; sample idx: {bad_idx[:5]}")
         return fixed
 
@@ -101,32 +97,38 @@ class SafeEmbedder(BaseEmbedding):
             return self._inner.get_query_embedding(query)
         return self._delegate_text_single(query)
 
-    # ---- BaseEmbedding hooks ----
-    def _get_text_embedding_batch(self, texts: List[Any]) -> List[List[float]]:
+    # ---- PUBLIC methods (sanitize here too) ----
+    def get_text_embedding_batch(self, texts: List[Any]) -> List[List[float]]:
         texts = self._coerce_batch(texts)
         return self._delegate_text_batch(texts)
 
-    def _get_text_embedding(self, text: Any) -> List[float]:
-        text = self._coerce_one(text)
-        if text is None:
-            text = " "
+    def get_text_embedding(self, text: Any) -> List[float]:
+        text = self._coerce_one(text) or " "
         return self._delegate_text_single(text)
 
-    def _get_query_embedding(self, query: Any) -> List[float]:
-        query = self._coerce_one(query)
-        if query is None:
-            query = " "
+    def get_query_embedding(self, query: Any) -> List[float]:
+        query = self._coerce_one(query) or " "
         return self._delegate_query_single(query)
+
+    # ---- protected hooks (still implement for safety) ----
+    def _get_text_embedding_batch(self, texts: List[Any]) -> List[List[float]]:
+        return self.get_text_embedding_batch(texts)
+
+    def _get_text_embedding(self, text: Any) -> List[float]:
+        return self.get_text_embedding(text)
+
+    def _get_query_embedding(self, query: Any) -> List[float]:
+        return self.get_query_embedding(query)
 
     # ---- async shims ----
     async def _aget_text_embedding_batch(self, texts: List[Any]) -> List[List[float]]:
-        return self._get_text_embedding_batch(texts)
+        return self.get_text_embedding_batch(texts)
 
     async def _aget_text_embedding(self, text: Any) -> List[float]:
-        return self._get_text_embedding(text)
+        return self.get_text_embedding(text)
 
     async def _aget_query_embedding(self, query: Any) -> List[float]:
-        return self._get_query_embedding(query)
+        return self.get_query_embedding(query)
         
 #############################
 ##  HELPER METHODS
@@ -257,6 +259,10 @@ def ingest(
                 logger.warning(f"VectorStoreIndex.from_nodes failed (err={str(e)}), trying an alternative method ...")
                 return VectorStoreIndex(nodes, storage_context=storage_context)
 
+        # - Check embedder
+        assert type(Settings.embed_model).__name__ == "SafeEmbedder", \
+            f"Unexpected embedder at index time: {type(Settings.embed_model)}"
+ 
         # - Store documents
         logger.info("Storing documents ...")
         index = build_index_from_nodes(clean_nodes, storage_context)
