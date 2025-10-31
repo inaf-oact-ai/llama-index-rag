@@ -248,13 +248,18 @@ def ingest(
         logger.info("nodes=%d, sample_text_len=%s", len(clean_nodes), len(clean_nodes[0].get_content()) if clean_nodes else None)
         logger.info("embedder=%s", type(Settings.embed_model).__name__)
 
+        # - Define method to store index
+        def build_index_from_nodes(nodes, storage_context):
+            try:
+                # Newer API
+                return VectorStoreIndex.from_nodes(nodes, storage_context=storage_context)
+            except AttributeError:
+                # Older API (your case)
+                return VectorStoreIndex(nodes, storage_context=storage_context)
+
         # - Store documents
         logger.info("Storing documents ...")
-        index = VectorStoreIndex.from_nodes(
-            clean_nodes,
-            storage_context=storage_context,
-        )
-        
+        index = build_index_from_nodes(clean_nodes, storage_context)
         
     else:
         # - Create settings
