@@ -252,6 +252,9 @@ def ingest(
             assert type(Settings.embed_model).__name__ == "SafeEmbedder", \
                 f"Unexpected embedder: {type(Settings.embed_model)}"
 
+            logger.info("nodes=%d, sample_text_len=%s", len(clean_nodes), len(clean_nodes[0].get_content()) if clean_nodes else None)
+            logger.info("embedder=%s", type(Settings.embed_model).__name__)
+
             # - Store documents
             logger.info("Storing documents ...")
             index = VectorStoreIndex.from_nodes(
