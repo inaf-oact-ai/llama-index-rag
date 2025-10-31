@@ -251,10 +251,10 @@ def ingest(
         # - Define method to store index
         def build_index_from_nodes(nodes, storage_context):
             try:
-                # Newer API
+                # Newer API (?)
                 return VectorStoreIndex.from_nodes(nodes, storage_context=storage_context)
-            except AttributeError:
-                # Older API (your case)
+            except Exception as e:
+                logger.warning(f"VectorStoreIndex.from_nodes failed (err={str(e)}), trying an alternative method ...")
                 return VectorStoreIndex(nodes, storage_context=storage_context)
 
         # - Store documents
