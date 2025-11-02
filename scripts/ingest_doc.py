@@ -224,7 +224,7 @@ def ingest(
     # - Check if data_path is directory
     if os.path.isdir(data_path):
         documents = SimpleDirectoryReader(data_path, required_exts=file_exts, recursive=recursive).load_data()
-    elif os.path.isfile(data_path)
+    elif os.path.isfile(data_path):
         input_files= [data_path]
         documents = SimpleDirectoryReader(input_files=input_files, required_exts=file_exts, recursive=recursive).load_data()
     else:
