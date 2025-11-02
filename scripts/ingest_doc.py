@@ -220,7 +220,16 @@ def ingest(
 ):
     """ Method to ingest paper in DB """
     logger.info("Indexing data...")
-    documents = SimpleDirectoryReader(data_path, required_exts=file_exts, recursive=recursive).load_data()
+    
+    # - Check if data_path is directory
+    if os.path.isdir(data_path):
+        documents = SimpleDirectoryReader(data_path, required_exts=file_exts, recursive=recursive).load_data()
+    elif os.path.isfile(data_path)
+        input_files= [data_path]
+        documents = SimpleDirectoryReader(input_files=input_files, required_exts=file_exts, recursive=recursive).load_data()
+    else:
+        logger.error(f"Data path {data_path} is not file/directory!")
+        raise AttributeError("Given data path must be a file/directory!")
 
     logger.info("Creating qdrant store ...")
     client = qdrant_client.QdrantClient(url=qdrant_url)
