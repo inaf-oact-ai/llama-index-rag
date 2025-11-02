@@ -261,35 +261,56 @@ def ingest(
         logger.info("Getting nodes from documents ...")
         nodes = splitter.get_nodes_from_documents(documents_to_be_stored)
 
-        def node_text(n):
+        #def node_text(n):
+        #    try:
+        #        return n.get_content(metadata_mode="none")
+        #    except Exception:
+        #        return None
+                
+        def clean_node_text(n):
             try:
-                return n.get_content(metadata_mode="none")
+                t = n.get_content(metadata_mode="none")
             except Exception:
-                return None
+                t = getattr(n, "text", None)
+            if isinstance(t, (bytes, bytearray)):
+                try: 
+                    t = bytes(t).decode("utf-8", errors="ignore")
+                except Exception: 
+                    t = None
+                if hasattr(n, "text"): 
+                    n.text = t
+            return t
 
         # - Selecting good nodes
         logger.info("Selecting good nodes ...")
-        clean_nodes = []
-        bad_nodes = []
-        for n in nodes:
-            t = node_text(n)
-            # Also repair bytes → str
-            if isinstance(t, bytes):
-                try:
-                    t = t.decode("utf-8", errors="ignore")
-                    n.text = t  # persist the decoded text on the node
-                except Exception:
-                    t = None
-            if isinstance(t, str) and t.strip():
-                clean_nodes.append(n)
-            else:
-                bad_nodes.append(getattr(n, "id_", None))
+        
+        clean_nodes = [n for n in nodes if isinstance((t:=clean_node_text(n)), str) and t.strip()]
+        logger.info("nodes=%d, clean=%d", len(nodes), len(clean_nodes))
+        
+        good_ids, good_embs, skipped = embed_nodes_resilient(clean_nodes, Settings.embed_model, batch_size=64)
+        logger.warning("embedded=%d, skipped=%d", len(good_ids), len(skipped))
 
-        if bad_nodes:
-            logger.warning("Skipping %d invalid chunks (post-split). Example: %s", len(bad_nodes), bad_nodes[:3])
+        #clean_nodes = []
+        #bad_nodes = []
+        #for n in nodes:
+        #    t = node_text(n)
+        #    # Also repair bytes → str
+        #    if isinstance(t, bytes):
+        #        try:
+        #            t = t.decode("utf-8", errors="ignore")
+        #            n.text = t  # persist the decoded text on the node
+        #        except Exception:
+        #            t = None
+        #    if isinstance(t, str) and t.strip():
+        #        clean_nodes.append(n)
+        #    else:
+        #        bad_nodes.append(getattr(n, "id_", None))
 
-        logger.info("nodes=%d, sample_text_len=%s", len(clean_nodes), len(clean_nodes[0].get_content()) if clean_nodes else None)
-        logger.info("embedder=%s", type(Settings.embed_model).__name__)
+        #if bad_nodes:
+        #    logger.warning("Skipping %d invalid chunks (post-split). Example: %s", len(bad_nodes), bad_nodes[:3])
+
+        #logger.info("nodes=%d, sample_text_len=%s", len(clean_nodes), len(clean_nodes[0].get_content()) if clean_nodes else None)
+        #logger.info("embedder=%s", type(Settings.embed_model).__name__)
 
         # - Define method to store index
         #def build_index_from_nodes(nodes, storage_context):
@@ -301,12 +322,37 @@ def ingest(
         #        return VectorStoreIndex(nodes, storage_context=storage_context)
 
         # - Check embedder
-        assert type(Settings.embed_model).__name__ == "SafeEmbedder", \
-            f"Unexpected embedder at index time: {type(Settings.embed_model)}"
+        #assert type(Settings.embed_model).__name__ == "SafeEmbedder", \
+        #    f"Unexpected embedder at index time: {type(Settings.embed_model)}"
  
         # - Store documents
-        logger.info("Storing documents ...")
-        index = build_index_from_nodes(clean_nodes, storage_context)
+        #logger.info("Storing documents ...")
+        #index = build_index_from_nodes(clean_nodes, storage_context)
+        
+        vs = storage_context.vector_store
+
+        # The add() signature varies slightly by backend; these two cover most LI versions:
+        added = False
+        try:
+            # Newer adapters
+            vs.add(ids=good_ids, embeddings=good_embs, nodes=None, metadata=None)
+            added = True
+        except TypeError:
+            # Older adapters
+            vs.add(embedding_results=list(zip(good_ids, good_embs)))
+
+        if not added:
+            logger.info("Vector store add() completed via fallback path.")
+
+        # - BUILD INDEX from the pre-populated vector store (no more embedding)
+        def build_from_vector_store():
+            if hasattr(VectorStoreIndex, "from_vector_store"):
+                return VectorStoreIndex.from_vector_store(vs, storage_context=storage_context)
+            # Very old LI: construct and avoid re-embedding by passing empty nodes
+            return VectorStoreIndex([], storage_context=storage_context)
+
+        index = build_from_vector_store()
+        logger.info("Index ready. Skipped nodes: %d", len(skipped))
         
     else:
         # - Create settings
@@ -321,6 +367,7 @@ def ingest(
             documents_to_be_stored, 
             storage_context=storage_context, 
             Settings=Settings,
+            show_progress=True
         )
     
     logger.info(
