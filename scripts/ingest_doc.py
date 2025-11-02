@@ -170,6 +170,39 @@ def build_index_from_nodes(nodes, storage_context):
             traceback.format_exc(),
         )
         raise   
+  
+def embed_nodes_resilient(nodes, embed_model, batch_size=64):
+    """Return (good_ids, good_embs, skipped_ids). Skips only truly offending nodes."""
+    good_ids, good_embs, skipped = [], [], []
+
+    def try_batch(batch_nodes):
+        texts = [n.get_content(metadata_mode="none") for n in batch_nodes]
+        # call your SafeEmbedder (it already sanitizes bytes/None/empties)
+        return embed_model.get_text_embedding_batch(texts)
+
+    def process(batch_nodes):
+        if not batch_nodes:
+            return
+        try:
+            embs = try_batch(batch_nodes)
+            # success: append all
+            for n, e in zip(batch_nodes, embs):
+                good_ids.append(n.node_id)  # id_ in some versions
+                good_embs.append(e)
+        except Exception:
+            # If single item fails, skip it; else split & recurse
+            if len(batch_nodes) == 1:
+                skipped.append(getattr(batch_nodes[0], "node_id", getattr(batch_nodes[0], "id_", None)))
+            else:
+                mid = len(batch_nodes) // 2
+                process(batch_nodes[:mid])
+                process(batch_nodes[mid:])
+
+    # walk in mini-batches for speed; fall back to bisection only on errors
+    for i in range(0, len(nodes), batch_size):
+        process(nodes[i:i+batch_size])
+
+    return good_ids, good_embs, skipped  
         
 #############################
 ##  HELPER METHODS
