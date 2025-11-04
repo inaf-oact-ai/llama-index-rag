@@ -170,7 +170,7 @@ st.sidebar.caption("Tip: set RAG_API_URL / RAG_DEFAULT_TOPK env vars to change d
 LOGO_URL = os.environ.get("RAG_LOGO_URL", "")
 
 # [NEW] Default to generated local logo if env var not set
-DEFAULT_LOGO = "share/radioRAG.png"
+DEFAULT_LOGO = "share/radioRAG_logo.png"
 if not LOGO_URL and os.path.exists(DEFAULT_LOGO):
     LOGO_URL = DEFAULT_LOGO
 
