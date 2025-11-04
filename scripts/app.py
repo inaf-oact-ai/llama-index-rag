@@ -118,6 +118,7 @@ with st.container():
     if LOGO_URL:
         #st.markdown(f"<div class='banner-wrap'><img src='{LOGO_URL}' alt='Radio RAG banner' /></div>", unsafe_allow_html=True)
         st.image(LOGO_URL, use_container_width=True)
+        st.markdown("<style>img {max-width:1600px !important;}</style>", unsafe_allow_html=True)
     else:
         st.markdown("<div style='font-size:40px'>🛰️</div>", unsafe_allow_html=True)
     
