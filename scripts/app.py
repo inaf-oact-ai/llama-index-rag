@@ -320,22 +320,24 @@ if submitted:
             citation = _journal_citation(meta)  # title, journal, vol(issue), pages, year
 
             # arXiv URL (if any)
-            arxiv_url = _arxiv_url(meta)
+            arxiv_url= meta.get("arxiv_abs_url")
+            if arxiv_url is None: # try to get url from arxiv_id
+                arxiv_url = _arxiv_url(meta)
             
-             
             link_html = f"<a class='paper-link' href='{arxiv_url}' target='_blank'>[LINK]</a>" if arxiv_url else ""
 
-            
             # Download link (if available)
-            download_url = None
-            for key in ["file_download_url", "download_url", "url", "pdf_url"]:
-                if key in meta and isinstance(meta[key], str) and meta[key].startswith("http"):
-                    download_url = meta[key]
-                    break
+            download_url= meta.get("arxiv_pdf_url")
+            #for key in ["file_download_url", "download_url", "url", "pdf_url"]:
+            #    if key in meta and isinstance(meta[key], str) and meta[key].startswith("http"):
+            #        download_url = meta[key]
+            #        break
 
             download_html = (f"<a class='paper-link' href='{download_url}' target='_blank'>[DOWNLOAD]</a>" if download_url else "")
 
-            print(f"meta: {meta}, arxiv_url: {arxiv_url}, download_url: {download_url}")
+            print(f"meta: {meta}")
+            print(f"arxiv_url: {arxiv_url}")
+            print(f"download_url: {download_url}")
 
             # score badge
             score_html = f"<span class='score-badge {_score_class(score)}'>{_score_label(score)}</span>"

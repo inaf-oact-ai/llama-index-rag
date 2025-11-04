@@ -254,7 +254,7 @@ def main():
                 response_sources.append({
                     "node_id": sn.node.node_id,
                     "score": sn.score,                     # similarity score
-                    #"file_path": md.get("file_path"),
+                    "file_path": md.get("file_path"),
                     "file_name": md.get("file_name"),
                     "page_label": md.get("page_label"),
                     # pass through biblio fields if you have them:
