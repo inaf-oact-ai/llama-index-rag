@@ -23,10 +23,10 @@ st.markdown(
     """
     <style>
   /* [CHANGED] Larger, more legible base typography */
-  html, body { font-size: 20px; } 
-  .main { padding-top: 1.25rem; font-size: 20px; }
-  /* html, body { font-size: 17px; } */
-  /* .main { padding-top: 1.0rem; font-size: 17px; } */
+  /* html, body { font-size: 20px; }  */
+  /* .main { padding-top: 1.25rem; font-size: 20px; } */
+  html, body { font-size: 17px; }
+  .main { padding-top: 1.0rem; font-size: 17px; }
   
   h1, h2, h3 { font-weight: 800; }
   h1 { font-size: 40px !important; }
