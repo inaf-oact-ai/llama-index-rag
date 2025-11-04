@@ -23,11 +23,11 @@ st.markdown(
     """
     <style>
       .app-header {
-        display: flex; align-items: center; gap: 14px; padding: 8px 12px; 
-        border-radius: 16px; background: linear-gradient(90deg, #0ea5e922, #22d3ee22);
-        border: 1px solid rgba(2,132,199,0.15);
+        /* [CHANGED] removed gradient background and border to eliminate blue rectangle */
+        display: flex; align-items: center; gap: 14px; padding: 0; 
+        border-radius: 0; background: transparent; border: none;
       }
-      .brand-title { font-size: 1.6rem; font-weight: 700; }
+      .brand-title { font-size: 1.8rem; font-weight: 800; }
       .brand-sub   { font-size: 0.95rem; color: #5b5b5b; }
       .ref-line { margin-bottom: .35rem; }
       .score-badge { font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.06); }
@@ -169,6 +169,11 @@ st.sidebar.caption("Tip: set RAG_API_URL / RAG_DEFAULT_TOPK env vars to change d
 # Optional logo URL
 LOGO_URL = os.environ.get("RAG_LOGO_URL", "")
 
+# [NEW] Default to generated local logo if env var not set
+DEFAULT_LOGO = "share/radioRAG.png"
+if not LOGO_URL and os.path.exists(DEFAULT_LOGO):
+    LOGO_URL = DEFAULT_LOGO
+
 ######################################
 ##     HEADER
 ######################################
@@ -177,18 +182,16 @@ with st.container():
     cols = st.columns([1, 9])
     with cols[0]:
         if LOGO_URL:
-            st.image(LOGO_URL, use_container_width=True)
+            # [CHANGED] explicit size for a clean inline logo; no emoji fallback checkbox-like look
+            st.image(LOGO_URL, width=56)
         else:
             st.markdown("<div style='font-size:40px'>🛰️</div>", unsafe_allow_html=True)
     with cols[1]:
+        # [CHANGED] simplified header without background rectangle
         st.markdown(
             """
-            <div class="app-header">
-              <div>
-                <div class="brand-title">Radio RAG </div>
-                <div class="brand-sub">Search your radio RAG backend and inspect retrieved references</div>
-              </div>
-            </div>
+            <div class="brand-title">Radio RAG</div>
+            <div class="brand-sub">Search your radio RAG backend and inspect retrieved references</div>
             """,
             unsafe_allow_html=True,
         )
@@ -275,19 +278,7 @@ if submitted:
 
             # arXiv URL (if any)
             arxiv_url = _arxiv_url(meta)
-            
             link_html = f"<a class='paper-link' href='{arxiv_url}' target='_blank'>[LINK]</a>" if arxiv_url else ""
-
-            # Download link (if available)
-            download_url = None
-            for key in ["file_download_url", "download_url", "url", "pdf_url"]:
-                if key in meta and isinstance(meta[key], str) and meta[key].startswith("http"):
-                    download_url = meta[key]
-                    break
-
-            download_html = (f"<a class='paper-link' href='{download_url}' target='_blank'>[DOWNLOAD]</a>" if download_url else "")
-
-            print(f"meta: {meta}, arxiv_url: {arxiv_url}, download_url: {download_url}")
 
             # score badge
             score_html = f"<span class='score-badge {_score_class(score)}'>{_score_label(score)}</span>"
@@ -304,18 +295,9 @@ if submitted:
             extra_html = " • ".join(details)
             extra_html = (" — " + extra_html) if extra_html else ""
 
-            #st.markdown(
-            #    f"<div class='ref-line'><strong>{i}. {display_name}</strong>{extra_html} • score {score_html} "
-            #    + (f" • {link_html}" if link_html else "") + "</div>",
-            #    unsafe_allow_html=True,
-            #)
-            
             st.markdown(
-                f"<div class='ref-line'><strong>{i}. {display_name}</strong>{extra_html} • "
-                f"score {score_html} "
-                + (f" • {link_html}" if link_html else "")
-                + (f" • {download_html}" if download_html else "")
-                + "</div>",
+                f"<div class='ref-line'><strong>{i}. {display_name}</strong>{extra_html} • score {score_html} "
+                + (f" • {link_html}" if link_html else "") + "</div>",
                 unsafe_allow_html=True,
             )
 
