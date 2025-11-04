@@ -23,15 +23,22 @@ st.markdown(
     """
     <style>
   /* [CHANGED] Larger, more legible base typography */
-  html, body { font-size: 20px; }
+  html, body { font-size: 20px; } 
   .main { padding-top: 1.25rem; font-size: 20px; }
+  /* html, body { font-size: 17px; } */
+  /* .main { padding-top: 1.0rem; font-size: 17px; } */
+  
   h1, h2, h3 { font-weight: 800; }
-  h1 { font-size: 48px !important; }
-  h2 { font-size: 28px !important; }
+  h1 { font-size: 40px !important; }
+  h2 { font-size: 24px !important; }
+  /* h1 { font-size: 48px !important; } */
+  /* h2 { font-size: 28px !important; } */
   .stMarkdown, .stTextInput, .stTextArea, label { font-size: 20px !important; }
 
   /* [NEW] Larger sidebar text */
-  section[data-testid="stSidebar"] * { font-size: 18px !important; }
+  /* section[data-testid="stSidebar"] * { font-size: 18px !important; } */
+  section[data-testid="stSidebar"] * { font-size: 16px !important; }
+
 
   /* [NEW] Make the prompt textarea light silver */
   .stTextArea textarea {
@@ -41,8 +48,11 @@ st.markdown(
   }
 
   /* Reference line + badges */
-  .ref-line { margin-bottom: .65rem; font-size: 19px; }
-  .score-badge { font-weight: 700; padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.06); font-size: 18px; }
+  /* .ref-line { margin-bottom: .65rem; font-size: 19px; } */
+  .ref-line { margin-bottom: .65rem; font-size: 16px; }
+  .score-badge { font-weight: 700; padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.06); font-size: 15px; }
+  /* .score-badge { font-weight: 700; padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.06); font-size: 18px; } */
+  
   .score-red { background:#ffe5e5; color:#b91c1c; }
   .score-orange { background:#fff0df; color:#c2410c; }
   .score-yellow { background:#fff9db; color:#92400e; }
@@ -53,6 +63,8 @@ st.markdown(
   .banner-wrap { display:flex; justify-content:center; }
   .banner-wrap img { width:100%; max-width: 700px; height:auto; }
   .app-subtitle { text-align:center; color:gray; font-size:22px; margin-top:4px; }
+  \* .app-subtitle { text-align:center; color:gray; font-size:19px; margin-top:4px; } */
+ 
 </style>
     """,
     unsafe_allow_html=True,
