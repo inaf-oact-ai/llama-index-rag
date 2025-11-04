@@ -221,6 +221,36 @@ def main():
                 md = sn.node.metadata or {}
                 print("--> md")
                 print(md)
+                
+                # - Set arxiv id
+                # --- arXiv extraction & normalization ---
+                arxiv_raw = (
+                    md.get("arxiv_id")
+                    or md.get("arXiv")
+                    or md.get("arxiv")
+                    or md.get("eprint")
+                    or md.get("identifier")
+                )
+                arxiv_norm = None
+                if isinstance(arxiv_raw, str):
+                    import re as _re
+                    # strip leading "arXiv:" and try to capture 2011.07620 (ignore version)
+                    s = _re.sub(r"^arXiv:\s*", "", arxiv_raw.strip(), flags=_re.IGNORECASE)
+                    m = _re.search(r"(\d{4}\.\d{4,5})", s)
+                    arxiv_norm = m.group(1) if m else s
+
+                # fallback: derive from file_name like 2011.07620v2.pdf
+                if not arxiv_norm:
+                    fn = (md.get("file_name") or "").strip()
+                    import re as _re
+                    m = _re.search(r"(\d{4}\.\d{4,5})(?:v\d+)?\.pdf$", fn)
+                    if m:
+                        arxiv_norm = m.group(1)
+
+                arxiv_abs_url = f"https://arxiv.org/abs/{arxiv_norm}" if arxiv_norm else None
+                arxiv_pdf_url = f"https://arxiv.org/pdf/{arxiv_norm}.pdf" if arxiv_norm else None
+                
+                # - Set response sources
                 response_sources.append({
                     "node_id": sn.node.node_id,
                     "score": sn.score,                     # similarity score
@@ -246,6 +276,11 @@ def main():
                     "year": md.get("year"),
                     "pub_year": md.get("pub_year"),
                     "date": md.get("date"),
+                    "bibcode": md.get("bibcode"),
+                    "doi": md.get("doi"),
+                    "arxiv_id": arxiv_norm,
+                    "arxiv_abs_url": arxiv_abs_url,
+                    "arxiv_pdf_url": arxiv_pdf_url,
                     "text": sn.node.get_content(),
                 })
                 
