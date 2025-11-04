@@ -64,6 +64,61 @@ st.markdown(
 # [CHANGED] use larger horizontal banner
 BANNER_LOGO = "share/radioRAG_banner.png"
 LOGO_URL = os.environ.get("RAG_LOGO_URL", BANNER_LOGO if os.path.exists(BANNER_LOGO) else None)
+print(f"LOGO_URL: {LOGO_URL}")
+
+
+
+######################################
+##     SIDEBAR CONFIG
+######################################
+
+st.sidebar.header("Backend Settings")
+API_BASE = st.sidebar.text_input(
+    "API base URL",
+    value=os.environ.get("RAG_API_URL", "http://localhost:8000"),
+    help="Your FastAPI base URL (no trailing slash)",
+)
+
+default_topk = int(os.environ.get("RAG_DEFAULT_TOPK", "5"))
+st.sidebar.caption("Tip: set RAG_API_URL / RAG_DEFAULT_TOPK env vars to change defaults.")
+
+
+######################################
+##  HEADER SECTION
+######################################
+#with st.container():
+#    cols = st.columns([1, 9])
+#    with cols[0]:
+#        if LOGO_URL:
+#            st.image(LOGO_URL, use_container_width=True)
+#        else:
+#            st.markdown("<div style='font-size:40px'>🛰️</div>", unsafe_allow_html=True)
+#    with cols[1]:
+#        st.markdown(
+#            """
+#            <div class="app-header">
+#              <div>
+#                <div class="brand-title">Radio RAG </div>
+#                <div class="brand-sub">Search your radio RAG backend and inspect retrieved references</div>
+#              </div>
+#            </div>
+#            """,
+#            unsafe_allow_html=True,
+#        )
+
+
+with st.container():
+    # [CHANGED] Always show a clear title
+    st.markdown("<h1 style='text-align:center;'>Radio RAG</h1>", unsafe_allow_html=True)
+
+    # [CHANGED] Banner centered and allowed to scale wide
+    if LOGO_URL:
+        st.markdown(f"<div class='banner-wrap'><img src='{LOGO_URL}' alt='Radio RAG banner' /></div>", unsafe_allow_html=True)
+    
+    st.markdown(
+        "<p class='app-subtitle'>AI-powered Retrieval-Augmented Generation for Radio Astronomy</p>",
+        unsafe_allow_html=True,
+    )
 
 ######################################
 ##     HELPER METHODS
@@ -173,59 +228,6 @@ def _arxiv_url(meta: dict) -> str | None:
     if not aid:
         return None
     return f"https://arxiv.org/abs/{aid}"
-
-
-######################################
-##     SIDEBAR CONFIG
-######################################
-
-st.sidebar.header("Backend Settings")
-API_BASE = st.sidebar.text_input(
-    "API base URL",
-    value=os.environ.get("RAG_API_URL", "http://localhost:8000"),
-    help="Your FastAPI base URL (no trailing slash)",
-)
-
-default_topk = int(os.environ.get("RAG_DEFAULT_TOPK", "5"))
-st.sidebar.caption("Tip: set RAG_API_URL / RAG_DEFAULT_TOPK env vars to change defaults.")
-
-
-######################################
-##  HEADER SECTION
-######################################
-#with st.container():
-#    cols = st.columns([1, 9])
-#    with cols[0]:
-#        if LOGO_URL:
-#            st.image(LOGO_URL, use_container_width=True)
-#        else:
-#            st.markdown("<div style='font-size:40px'>🛰️</div>", unsafe_allow_html=True)
-#    with cols[1]:
-#        st.markdown(
-#            """
-#            <div class="app-header">
-#              <div>
-#                <div class="brand-title">Radio RAG </div>
-#                <div class="brand-sub">Search your radio RAG backend and inspect retrieved references</div>
-#              </div>
-#            </div>
-#            """,
-#            unsafe_allow_html=True,
-#        )
-
-
-with st.container():
-    # [CHANGED] Always show a clear title
-    st.markdown("<h1 style='text-align:center;'>Radio RAG</h1>", unsafe_allow_html=True)
-
-    # [CHANGED] Banner centered and allowed to scale wide
-    if LOGO_URL:
-        st.markdown(f"<div class='banner-wrap'><img src='{LOGO_URL}' alt='Radio RAG banner' /></div>", unsafe_allow_html=True)
-    
-    st.markdown(
-        "<p class='app-subtitle'>AI-powered Retrieval-Augmented Generation for Radio Astronomy</p>",
-        unsafe_allow_html=True,
-    )
 
 
 ######################################
