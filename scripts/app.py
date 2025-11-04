@@ -275,6 +275,8 @@ if submitted:
 
             # arXiv URL (if any)
             arxiv_url = _arxiv_url(meta)
+            
+            print(f"meta: {meta}, arxiv_url: {arxiv_url}")
             link_html = f"<a class='paper-link' href='{arxiv_url}' target='_blank'>[LINK]</a>" if arxiv_url else ""
 
             # score badge
