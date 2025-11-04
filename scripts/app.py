@@ -51,7 +51,7 @@ st.markdown(
 
   /* [NEW] Center the banner and let it grow up to a large max width */
   .banner-wrap { display:flex; justify-content:center; }
-  .banner-wrap img { width:100%; max-width: 840px; height:auto; }
+  .banner-wrap img { width:100%; max-width: 700px; height:auto; }
   .app-subtitle { text-align:center; color:gray; font-size:22px; margin-top:4px; }
 </style>
     """,
@@ -245,16 +245,17 @@ def _arxiv_url(meta: dict) -> str | None:
 
 # --- Examples (click to auto-fill & submit) ---
 EXAMPLES = [
-    "Can you describe what are ultra ultra-compact HII regions (UC HII)? How they differ from hyper-compact HII regions (HC HII) or extended HII regions? How many HC and UC HII regions are currently known?",
+    "Can you explain the difference between ultra ultra-compact (UC) and hyper-compact (HC) HII regions? How many HC and UC HIIs are currently known in radio?",
     "Do you know what is an Odd Radio Circle (ORC)? Describe its morphology and how they are detected in radio surveys.",
-    "Can you summarize how many Supernova Remnants (SNR) are currently known, what fraction of them were first detected in the radio band?"
+    "Can you summarize how many Supernova Remnants (SNR) are currently known, what fraction of them are detected in the radio band?"
 ]
 
-
-st.markdown("**Below, you find some example test queries. Click one of them:**")
+st.info("Enter a question and click *Search*. Below, you find some examples. *Click* one of them for testing.")
+#st.markdown("**Below, you find some example test queries. Click one of them:**")
 _cols = st.columns(len(EXAMPLES))
 for _i, _ex in enumerate(EXAMPLES):
-    if _cols[_i].button(_ex, key=f"ex_{_i}"):
+    # show button label in italic
+    if _cols[_i].button(f"_{_ex}_", key=f"ex_{_i}"):
         st.session_state["prompt_seed"] = _ex
         st.session_state["autosubmit"] = True
 
@@ -400,7 +401,7 @@ else:
     
     st.markdown(
         "<hr style='margin-top:3em;margin-bottom:1em;'>"
-        "<p style='text-align:center;color:gray;font-size:14px;'>"
+        "<p style='text-align:center;color:black;font-size:18px;'>"
         "© 2025 S. Riggi – INAF"
         "</p>",
         unsafe_allow_html=True,
