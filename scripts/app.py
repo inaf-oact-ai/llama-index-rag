@@ -250,7 +250,6 @@ EXAMPLES = [
     "Can you summarize how many Supernova Remnants (SNR) are currently known, what fraction of them were first detected in the radio band?"
 ]
 
- and 
 
 st.markdown("**Below, you find some example test queries. Click one of them:**")
 _cols = st.columns(len(EXAMPLES))
@@ -398,4 +397,12 @@ if submitted:
 
 else:
     st.info("Enter a question above and click *Search* to test your RAG service.")
+    
+    st.markdown(
+        "<hr style='margin-top:3em;margin-bottom:1em;'>"
+        "<p style='text-align:center;color:gray;font-size:14px;'>"
+        "© 2025 S. Riggi – INAF"
+        "</p>",
+        unsafe_allow_html=True,
+    )
 
