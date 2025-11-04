@@ -13,16 +13,44 @@ import re
 import requests
 import streamlit as st
 
-st.set_page_config(page_title="RAG Tester", page_icon="🔎", layout="centered")
+######################################
+##  PAGE CONFIG & LIGHT THEMING
+######################################
+st.set_page_config(page_title="Radio RAG", page_icon="🔎", layout="centered")
 
+# Lightweight CSS tweaks for nicer aesthetics
+st.markdown(
+    """
+    <style>
+      .app-header {
+        display: flex; align-items: center; gap: 14px; padding: 8px 12px; 
+        border-radius: 16px; background: linear-gradient(90deg, #0ea5e922, #22d3ee22);
+        border: 1px solid rgba(2,132,199,0.15);
+      }
+      .brand-title { font-size: 1.6rem; font-weight: 700; }
+      .brand-sub   { font-size: 0.95rem; color: #5b5b5b; }
+      .ref-line { margin-bottom: .35rem; }
+      .score-badge { font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.06); }
+      .score-red { background:#ffe5e5; color:#b91c1c; }
+      .score-orange { background:#fff0df; color:#c2410c; }
+      .score-yellow { background:#fff9db; color:#92400e; }
+      .score-green { background:#e7f7e7; color:#166534; }
+      /* make links a bit prettier */
+      .paper-link { text-decoration:none; font-weight:600; border-bottom:1px dashed rgba(2,132,199,0.35); }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-############################
+######################################
 ##     HELPER METHODS
-############################
+######################################
+
 def _basename(fp: str | None, fallback: str | None) -> str:
     if isinstance(fp, str) and fp:
         return os.path.basename(fp)
     return (fallback or "").strip() or "(unknown)"
+
 
 def _first_author(meta: dict) -> str | None:
     # try a few common keys
@@ -47,6 +75,7 @@ def _first_author(meta: dict) -> str | None:
         initials = " ".join([f[0] + "." for f in firsts.split() if f])
         return f"{last}, {initials}" if initials else last
     return first
+
 
 def _journal_citation(meta: dict) -> str:
     # Accept a variety of keys
@@ -76,31 +105,102 @@ def _journal_citation(meta: dict) -> str:
     return ", ".join(bits)
 
 
+def _score_class(score: float | None) -> str:
+    if score is None:
+        return "score-yellow"
+    if score < 0.3:
+        return "score-red"
+    if score < 0.5:
+        return "score-orange"
+    if score < 0.7:
+        return "score-yellow"
+    return "score-green"
 
 
+def _score_label(score: float | None) -> str:
+    if score is None:
+        return "n/a"
+    return f"{score:.3f}"
 
+
+def _arxiv_id_from_meta(meta: dict) -> str | None:
+    # common metadata keys where an arXiv id might live
+    for k in ["arxiv_id", "arXiv", "arxiv", "eprint_id", "eprint", "arxivId", "identifier"]:
+        val = meta.get(k)
+        if isinstance(val, str) and val.strip():
+            # normalize something like "arXiv:2101.01234v2" to an abs-URL-friendly id
+            v = val.strip()
+            # often metadata contains full URLs already
+            if v.startswith("http://") or v.startswith("https://"):
+                if "arxiv.org" in v:
+                    # return id segment after /abs/ or /pdf/
+                    m = re.search(r"arxiv\.org/(abs|pdf)/([^?#/]+)", v)
+                    if m:
+                        return m.group(2).replace(".pdf", "")
+                    return None
+                # non-arxiv URL is not useful for arxiv link
+                continue
+            v = re.sub(r"^arxiv:\s*", "", v, flags=re.IGNORECASE)
+            return v
+    return None
+
+
+def _arxiv_url(meta: dict) -> str | None:
+    aid = _arxiv_id_from_meta(meta)
+    if not aid:
+        return None
+    return f"https://arxiv.org/abs/{aid}"
 
 
 ######################################
-##     APP
+##     SIDEBAR CONFIG
 ######################################
 
-# --- Sidebar config ---
 st.sidebar.header("Backend Settings")
 API_BASE = st.sidebar.text_input(
     "API base URL",
     value=os.environ.get("RAG_API_URL", "http://localhost:8000"),
     help="Your FastAPI base URL (no trailing slash)",
 )
+
 default_topk = int(os.environ.get("RAG_DEFAULT_TOPK", "3"))
 st.sidebar.caption("Tip: set RAG_API_URL / RAG_DEFAULT_TOPK env vars to change defaults.")
 
-st.title("🔎 RAG Web Tester")
+# Optional logo URL
+LOGO_URL = os.environ.get("RAG_LOGO_URL", "")
+
+######################################
+##     HEADER
+######################################
+
+with st.container():
+    cols = st.columns([1, 9])
+    with cols[0]:
+        if LOGO_URL:
+            st.image(LOGO_URL, use_container_width=True)
+        else:
+            st.markdown("<div style='font-size:40px'>🛰️</div>", unsafe_allow_html=True)
+    with cols[1]:
+        st.markdown(
+            """
+            <div class="app-header">
+              <div>
+                <div class="brand-title">Radio RAG </div>
+                <div class="brand-sub">Search your radio RAG backend and inspect retrieved references</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+######################################
+##     APP BODY
+######################################
 
 # --- Form ---
 with st.form(key="query_form"):
     prompt = st.text_area("Your question", height=120, placeholder="Ask about radio astronomy papers…")
-    top_k = st.slider("Similarity top-k", min_value=1, max_value=5, value=default_topk, step=1)
+    top_k = st.slider("Similarity top-k", min_value=1, max_value=10, value=default_topk, step=1)
     submitted = st.form_submit_button("Search")
 
 if submitted:
@@ -148,12 +248,6 @@ if submitted:
     st.subheader("References (by similarity)")
     sources = data.get("sources", []) or []
 
-    # Sort by score (descending), keep only the fields you asked for:
-    def _basename(fp: str | None, fallback: str | None) -> str:
-        if isinstance(fp, str) and fp:
-            return os.path.basename(fp)
-        return (fallback or "").strip() or "(unknown)"
-
     sources_sorted = sorted(
         sources,
         key=lambda s: (s.get("score") is not None, s.get("score", 0.0)),
@@ -163,18 +257,6 @@ if submitted:
     if not sources_sorted:
         st.caption("No references.")
     else:
-        #for i, src in enumerate(sources_sorted, 1):
-        #    meta = src
-        #    file_name = meta.get("file_name")
-        #    file_path = meta.get("file_path")
-        #    page = meta.get("page_label")
-        #    score = meta.get("score")
-
-        #    display_name = file_name or _basename(file_path, file_name)
-        #    # Show filename (no basedir), page and similarity score
-        #    st.markdown(f"**{i}. {display_name}**  — page {page}, score {score:.3f}" if score is not None else
-        #                f"**{i}. {display_name}**  — page {page}")
-                        
         for i, src in enumerate(sources_sorted, 1):
             score = src.get("score")
             meta  = src  # assuming your backend flattens node.metadata into the source dict
@@ -191,22 +273,31 @@ if submitted:
             author = _first_author(meta)
             citation = _journal_citation(meta)  # title, journal, vol(issue), pages, year
 
-            # Build the line:
-            line = f"**{i}. {display_name}**"
-            details = []
+            # arXiv URL (if any)
+            arxiv_url = _arxiv_url(meta)
+            link_html = f"<a class='paper-link' href='{arxiv_url}' target='_blank'>[LINK]</a>" if arxiv_url else ""
 
+            # score badge
+            score_html = f"<span class='score-badge {_score_class(score)}'>{_score_label(score)}</span>"
+
+            # Build the line
+            details = []
             if author or citation:
                 who_what = ", ".join([x for x in [author, citation] if x])
                 if who_what:
                     details.append(who_what)
-
             if page:
                 details.append(f"p. {page}")
-            if score is not None:
-                details.append(f"score {score:.3f}")
 
-            if details:
-                line += " — " + " • ".join(details)
+            extra_html = " • ".join(details)
+            extra_html = (" — " + extra_html) if extra_html else ""
 
-            st.markdown(line)                
-                                   
+            st.markdown(
+                f"<div class='ref-line'><strong>{i}. {display_name}</strong>{extra_html} • score {score_html} "
+                + (f" • {link_html}" if link_html else "") + "</div>",
+                unsafe_allow_html=True,
+            )
+
+else:
+    st.info("Enter a question above and click *Search* to test your RAG service.")
+
