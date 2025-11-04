@@ -62,7 +62,8 @@ st.markdown(
 ##  LOGO CONFIG
 ######################################
 # [CHANGED] use larger horizontal banner
-BANNER_LOGO = "share/radioRAG_banner.png"
+#BANNER_LOGO = "share/radioRAG_banner.png"
+BANNER_LOGO = "https://github.com/inaf-oact-ai/llama-index-rag/blob/main/share/radioRAG_banner.png"
 LOGO_URL = os.environ.get("RAG_LOGO_URL", BANNER_LOGO if os.path.exists(BANNER_LOGO) else None)
 print(f"LOGO_URL: {LOGO_URL}")
 
@@ -114,6 +115,9 @@ with st.container():
     # [CHANGED] Banner centered and allowed to scale wide
     if LOGO_URL:
         st.markdown(f"<div class='banner-wrap'><img src='{LOGO_URL}' alt='Radio RAG banner' /></div>", unsafe_allow_html=True)
+        #st.image(LOGO_URL, use_container_width=True)
+    else:
+        st.markdown("<div style='font-size:40px'>🛰️</div>", unsafe_allow_html=True)
     
     st.markdown(
         "<p class='app-subtitle'>AI-powered Retrieval-Augmented Generation for Radio Astronomy</p>",
