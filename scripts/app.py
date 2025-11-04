@@ -51,7 +51,7 @@ st.markdown(
 
   /* [NEW] Center the banner and let it grow up to a large max width */
   .banner-wrap { display:flex; justify-content:center; }
-  .banner-wrap img { width:100%; max-width: 1200px; height:auto; }
+  .banner-wrap img { width:100%; max-width: 840px; height:auto; }
   .app-subtitle { text-align:center; color:gray; font-size:22px; margin-top:4px; }
 </style>
     """,
@@ -243,11 +243,38 @@ def _arxiv_url(meta: dict) -> str | None:
 ##     APP BODY
 ######################################
 
+# --- Examples (click to auto-fill & submit) ---
+EXAMPLES = [
+    "Can you describe what are ultra ultra-compact HII regions (UC HII)? How they differ from hyper-compact HII regions (HC HII) or extended HII regions? How many HC and UC HII regions are currently known?",
+    "Do you know what is an Odd Radio Circle (ORC)? Describe its morphology and how they are detected in radio surveys.",
+    "Can you summarize how many Supernova Remnants (SNR) are currently known, what fraction of them were first detected in the radio band?"
+]
+
+ and 
+
+st.markdown("**Below, you find some example test queries. Click one of them:**")
+_cols = st.columns(len(EXAMPLES))
+for _i, _ex in enumerate(EXAMPLES):
+    if _cols[_i].button(_ex, key=f"ex_{_i}"):
+        st.session_state["prompt_seed"] = _ex
+        st.session_state["autosubmit"] = True
+
 # --- Form ---
 with st.form(key="query_form"):
-    prompt = st.text_area("Your question", height=120, placeholder="Ask about radio astronomy papers…")
+    #prompt = st.text_area("Your question", height=120, placeholder="Ask about radio astronomy papers…")
+    prompt = st.text_area(
+        "Your question",
+        height=120,
+        value=st.session_state.get("prompt_seed", ""),
+        placeholder="Ask about radio astronomy papers…"
+    )
+    
     top_k = st.slider("Similarity top-k", min_value=1, max_value=10, value=default_topk, step=1)
     submitted = st.form_submit_button("Search")
+    
+    # Auto-submit if an example button was clicked
+    if st.session_state.pop("autosubmit", False) and not submitted:
+        submitted = True
 
 if submitted:
     if not prompt.strip():
