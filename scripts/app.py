@@ -12,19 +12,21 @@ import streamlit as st
 ######################################
 st.set_page_config(page_title="Radio RAG", page_icon="🔎", layout="centered")
 
-# [CHANGED] Simplified clean style without blue background box
+# [CHANGED] Global typography and layout improvements
 st.markdown(
     """
     <style>
-      body { background-color: #fafafa; }
-      .main { padding-top: 1rem; }
-      .ref-line { margin-bottom: .35rem; }
-      .score-badge { font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.06); }
+      body { background-color: #fafafa; font-size: 18px; }
+      .main { padding-top: 1.5rem; font-size: 18px; }
+      h1, h2, h3, .stMarkdown, .stTextInput, .stTextArea, label, .css-16huue1 { font-size: 18px !important; }
+      .ref-line { margin-bottom: .5rem; font-size: 17px; }
+      .score-badge { font-weight: 700; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.06); font-size: 16px; }
       .score-red { background:#ffe5e5; color:#b91c1c; }
       .score-orange { background:#fff0df; color:#c2410c; }
       .score-yellow { background:#fff9db; color:#92400e; }
       .score-green { background:#e7f7e7; color:#166534; }
       .paper-link { text-decoration:none; font-weight:600; border-bottom:1px dashed rgba(2,132,199,0.35); }
+      .app-subtitle { text-align:center; color:gray; font-size:20px; margin-top:-10px; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -33,7 +35,7 @@ st.markdown(
 ######################################
 ##  LOGO CONFIG
 ######################################
-# [CHANGED] use horizontal banner
+# [CHANGED] use larger horizontal banner
 BANNER_LOGO = "share/radioRAG_banner.png"
 LOGO_URL = os.environ.get("RAG_LOGO_URL", BANNER_LOGO if os.path.exists(BANNER_LOGO) else None)
 
@@ -42,12 +44,12 @@ LOGO_URL = os.environ.get("RAG_LOGO_URL", BANNER_LOGO if os.path.exists(BANNER_L
 ######################################
 with st.container():
     if LOGO_URL:
-        # [CHANGED] Display wide banner at top center
-        st.image(LOGO_URL, use_container_width=True)
+        # [CHANGED] Display banner at top center with larger width
+        st.image(LOGO_URL, use_container_width=True, output_format="PNG")
     else:
-        st.markdown("<h1 style='text-align:center;'>Radio RAG</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align:center;font-size:40px;'>Radio RAG</h1>", unsafe_allow_html=True)
     st.markdown(
-        "<p style='text-align:center;color:gray;'>AI-powered Retrieval-Augmented Generation for Radio Astronomy</p>",
+        "<p class='app-subtitle'>AI-powered Retrieval-Augmented Generation for Radio Astronomy</p>",
         unsafe_allow_html=True,
     )
 
@@ -94,7 +96,7 @@ def _arxiv_url(meta):
 ##  MAIN APP BODY
 ######################################
 with st.form(key="query_form"):
-    prompt = st.text_area("Your question", height=120, placeholder="Ask about radio astronomy papers…")
+    prompt = st.text_area("Your question", height=150, placeholder="Ask about radio astronomy papers…")
     top_k = st.slider("Similarity top-k", min_value=1, max_value=10, value=default_topk, step=1)
     submitted = st.form_submit_button("Search")
 
