@@ -396,14 +396,14 @@ if submitted:
                 unsafe_allow_html=True,
             )
 
-else:
-    st.info("Enter a question above and click *Search* to test your RAG service.")
+#else:
+#    st.info("Enter a question above and click *Search* to test your RAG service.")
     
-    st.markdown(
-        "<hr style='margin-top:3em;margin-bottom:1em;'>"
-        "<p style='text-align:center;color:black;font-size:18px;'>"
-        "© 2025 S. Riggi – INAF"
-        "</p>",
-        unsafe_allow_html=True,
-    )
+st.markdown(
+    "<hr style='margin-top:3em;margin-bottom:1em;'>"
+    "<p style='text-align:center;color:black;font-size:18px;'>"
+    "© 2025 S. Riggi – INAF"
+    "</p>",
+    unsafe_allow_html=True,
+)
 
