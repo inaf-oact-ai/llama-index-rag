@@ -35,6 +35,12 @@ logger = structlog.get_logger()
 #############################
 ##    RAG CLASS
 #############################
+collection_descriptions = {
+    "radiopapers": "Scientific papers stored in ArXiV repository with subject keywords related to radio astronomy.",
+    "radiobooks": "Text books with subjects related to radio astronomy.",
+}
+
+
 class RAG:
     def __init__(
         self,
@@ -344,12 +350,13 @@ def main():
                         node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=args.similarity_thr)],
                         verbose=True,
                     )
+                    desc = collection_descriptions.get(cname, f"Qdrant collection '{cname}'")
                     tools.append(
                         QueryEngineTool.from_defaults(
                             query_engine=eng,
-                            description=f"Qdrant collection '{cname}'"
+                            description=desc
                         )
-                    )
+                    )    
         
                 # Let the LLM route/merge across collections; select_top_k lets it pick multiple sources
                 query_engine = RouterQueryEngine.from_defaults(
