@@ -78,7 +78,7 @@ st.markdown(
 #LOGO_URL = os.environ.get("RAG_LOGO_URL", BANNER_LOGO if os.path.exists(BANNER_LOGO) else None)
 LOGO_URL = os.environ.get(
     "RAG_LOGO_URL",
-    "https://raw.githubusercontent.com/inaf-oact-ai/llama-index-rag/main/share/radioRAG_banner_v2.png"
+    "https://raw.githubusercontent.com/inaf-oact-ai/llama-index-rag/main/share/radioRAG_banner_v3.png"
 )
 print(f"LOGO_URL: {LOGO_URL}")
 
