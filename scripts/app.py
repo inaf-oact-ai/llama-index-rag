@@ -427,12 +427,13 @@ if submitted:
                 details.append(f"p. {page}")
 
             extra_html = " • ".join(details)
-            extra_html = (" — " + extra_html) if extra_html else ""
+            #extra_html = (" — " + extra_html) if extra_html else ""
 
             
             st.markdown(
                 #f"<div class='ref-line'><strong>{i}. {display_name}</strong>{extra_html} • "
-                f"<div class='ref-line'>{i}) <strong> {author} </strong>, {extra_html} • "
+                #f"<div class='ref-line'>{i}) <strong> {author} </strong>, {extra_html} • "
+                f"<div class='ref-line'>{i}) <strong> {author} </strong>, {extra_html} — "
                 f"score {score_html} "
                 + (f" • {link_html}" if link_html else "")
                 + (f" • {download_html}" if download_html else "")
