@@ -204,6 +204,25 @@ def _journal_citation(meta: dict) -> str:
     return ", ".join(bits)
 
 
+def _book_citation(meta: dict) -> str:
+    # Accept a variety of keys
+    title   = meta.get("title") or meta.get("paper_title") or meta.get("document_title")
+    publisher = meta.get("publisher")
+    pages   = meta.get("pages")
+    year    = meta.get("year")
+
+    # try to extract a 4-digit year from date strings
+    if isinstance(year, str):
+        m = re.search(r"(19|20)\d{2}", year)
+        year = m.group(0) if m else year
+
+    bits = []
+    if title:   bits.append(f"“{title}”")
+    if publisher: bits.append(publisher)
+    if pages:   bits.append(pages)
+    if year:    bits.append(str(year))
+    return ", ".join(bits)
+
 def _score_class(score: float | None) -> str:
     if score is None:
         return "score-yellow"
@@ -346,42 +365,57 @@ if submitted:
             score = src.get("score")
             meta  = src  # assuming your backend flattens node.metadata into the source dict
 
-            # basic file info
+            # - Check source doc type
+            doctype= meta.get("doctype")
+
+            # - Get basic file info
             file_name = meta.get("file_name")
             file_path = meta.get("file_path")
             display_name = file_name or _basename(file_path, file_name)
 
-            # page
+            # - Get page
             page = meta.get("page_label") or meta.get("page")
-
-            # rich bibliographic info
-            author = _first_author(meta)
-            citation = _journal_citation(meta)  # title, journal, vol(issue), pages, year
-
-            # arXiv URL (if any)
-            arxiv_url= meta.get("arxiv_abs_url")
-            if arxiv_url is None: # try to get url from arxiv_id
-                arxiv_url = _arxiv_url(meta)
             
-            link_html = f"<a class='paper-link' href='{arxiv_url}' target='_blank'>[LINK]</a>" if arxiv_url else ""
+            # - Extract rich bibliographic info
+            if doctype=="arxiv":
+                # - Extract author & citation
+                author = _first_author(meta)
+                citation = _journal_citation(meta)  # title, journal, vol(issue), pages, year
 
-            # Download link (if available)
-            download_url= meta.get("arxiv_pdf_url")
-            #for key in ["file_download_url", "download_url", "url", "pdf_url"]:
-            #    if key in meta and isinstance(meta[key], str) and meta[key].startswith("http"):
-            #        download_url = meta[key]
-            #        break
-
+                # - Retrieve arXiv URL (if any)
+                url= meta.get("arxiv_abs_url")
+                if url is None: # try to get url from arxiv_id
+                    url = _arxiv_url(meta)
+            
+                # - Retrieve download link (if available)
+                download_url= meta.get("arxiv_pdf_url")
+                        
+            elif doctype==""
+                # - Extract author
+                author = meta.get("first_author")
+                citation = _book_citation(meta)
+                
+                # - Retrieve book URL
+                url= meta.get("url")
+                
+                # - Retrieve download link (if available)
+                download_url= meta.get("download_url")
+                
+            else:
+                print(f"WARN: Unknown doctype retrieved {doctype}, will set empty link field!")
+                
+            # - Set link fields
+            link_html = f"<a class='paper-link' href='{url}' target='_blank'>[LINK]</a>" if url else ""
             download_html = (f"<a class='paper-link' href='{download_url}' target='_blank'>[DOWNLOAD]</a>" if download_url else "")
-
+            
             print(f"meta: {meta}")
-            print(f"arxiv_url: {arxiv_url}")
+            print(f"url: {url}")
             print(f"download_url: {download_url}")
 
-            # score badge
+            # - Set score badge
             score_html = f"<span class='score-badge {_score_class(score)}'>{_score_label(score)}</span>"
 
-            # Build the line
+            # - Set citation
             details = []
             if author or citation:
                 who_what = ", ".join([x for x in [author, citation] if x])
@@ -393,11 +427,6 @@ if submitted:
             extra_html = " • ".join(details)
             extra_html = (" — " + extra_html) if extra_html else ""
 
-            #st.markdown(
-            #    f"<div class='ref-line'><strong>{i}. {display_name}</strong>{extra_html} • score {score_html} "
-            #    + (f" • {link_html}" if link_html else "") + "</div>",
-            #    unsafe_allow_html=True,
-            #)
             
             st.markdown(
                 f"<div class='ref-line'><strong>{i}. {display_name}</strong>{extra_html} • "
