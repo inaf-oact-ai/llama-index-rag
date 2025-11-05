@@ -243,7 +243,7 @@ def load_args():
     parser.add_argument("--llm_thinking", dest="llm_thinking", action='store_true',help='Enable LLM thinking (default=False)')	
     parser.set_defaults(llm_thinking=False)
     parser.add_argument("-qdrant_url", "--qdrant_url", type=str, required=False, default="http://localhost:6333", help="QDRant URL")
-    #parser.add_argument("-select_top_k", "--select_top_k", type=int, required=False, default=10, help="Max number of collection source tools used in multi-source retrieval")
+    parser.add_argument("-num_queries", "--num_queries", type=int, required=False, default=1, help="For multi-source aggregation, set to 1 to disable extra augmented queries")
     
     logger.info("Parsing arguments ...")
     args = parser.parse_args()
@@ -379,10 +379,10 @@ def main():
                 # - Fuse results (simple union + dedupe; 1 query => no query expansion)
                 fusion = QueryFusionRetriever(
                     retrievers=retrievers,
-                    similarity_top_k=query.similarity_top_k,  # per-retriever top_k
-                    num_queries=1,                             # keep 1 to disable expansion
+                    similarity_top_k=query.similarity_top_k,   # per-retriever top_k
+                    num_queries=args.num_queries,              # keep 1 to disable expansion
                     # mode="reciprocal_rerank",                # optional: stronger RRF re-ranking
-                    use_async=True,
+                    use_async=False,
                     verbose=True,
                 )
 
