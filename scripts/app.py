@@ -269,6 +269,33 @@ def _arxiv_url(meta: dict) -> str | None:
         return None
     return f"https://arxiv.org/abs/{aid}"
 
+def format_book_authors(authors: list[str]) -> str:
+    """
+    Convert a list of author strings from book-style metadata to arXiv-style citation.
+
+    Example:
+        ["M.D. Filipovic", "T. Caio"] -> "Filipovic, M.D. et al."
+        ["M.D. Filipovic"] -> "Filipovic, M.D."
+    """
+    if not authors:
+        return ""
+
+    def normalize_name(name: str) -> str:
+        # Split by whitespace and strip punctuation
+        parts = name.strip().replace(",", "").split()
+        if not parts:
+            return ""
+        surname = parts[-1]
+        initials = "".join(parts[:-1])
+        return f"{surname}, {initials}"
+
+    formatted_first = normalize_name(authors[0])
+
+    if len(authors) == 1:
+        return formatted_first
+    else:
+        return f"{formatted_first} et al."
+
 
 ######################################
 ##     APP BODY
@@ -380,6 +407,7 @@ if submitted:
             if doctype=="arxiv":
                 # - Extract author & citation
                 author = _first_author(meta)
+                authors = meta.get("authors")
                 citation = _journal_citation(meta)  # title, journal, vol(issue), pages, year
 
                 # - Retrieve arXiv URL (if any)
@@ -393,6 +421,7 @@ if submitted:
             elif doctype=="book":
                 # - Extract author
                 author = meta.get("first_author")
+                authors= format_book_authors(meta.get("authors")) 
                 citation = _book_citation(meta)
                 
                 # - Retrieve book URL
@@ -432,8 +461,7 @@ if submitted:
             
             st.markdown(
                 #f"<div class='ref-line'><strong>{i}. {display_name}</strong>{extra_html} • "
-                #f"<div class='ref-line'>{i}) <strong> {author} </strong>, {extra_html} • "
-                f"<div class='ref-line'>{i}) <strong> {author} </strong>, {extra_html} — "
+                f"<div class='ref-line'>{i}) <strong> {authors} </strong>, {extra_html} — "
                 f"score {score_html} "
                 + (f" • {link_html}" if link_html else "")
                 + (f" • {download_html}" if download_html else "")
