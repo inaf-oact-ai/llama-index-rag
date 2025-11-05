@@ -390,7 +390,7 @@ if submitted:
                 # - Retrieve download link (if available)
                 download_url= meta.get("arxiv_pdf_url")
                         
-            elif doctype==""
+            elif doctype=="book":
                 # - Extract author
                 author = meta.get("first_author")
                 citation = _book_citation(meta)
