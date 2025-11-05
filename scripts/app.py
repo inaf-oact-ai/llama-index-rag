@@ -416,11 +416,13 @@ if submitted:
             score_html = f"<span class='score-badge {_score_class(score)}'>{_score_label(score)}</span>"
 
             # - Set citation
-            details = []
-            if author or citation:
-                who_what = ", ".join([x for x in [author, citation] if x])
-                if who_what:
-                    details.append(who_what)
+            #details = []
+            #if author or citation:
+            #    who_what = ", ".join([x for x in [author, citation] if x])
+            #    if who_what:
+            #        details.append(who_what)
+            
+            details = [citation]
             if page:
                 details.append(f"p. {page}")
 
@@ -429,7 +431,8 @@ if submitted:
 
             
             st.markdown(
-                f"<div class='ref-line'><strong>{i}. {display_name}</strong>{extra_html} • "
+                #f"<div class='ref-line'><strong>{i}. {display_name}</strong>{extra_html} • "
+                f"<div class='ref-line'>{i}) <strong> {author} </strong>, {extra_html} • "
                 f"score {score_html} "
                 + (f" • {link_html}" if link_html else "")
                 + (f" • {download_html}" if download_html else "")
