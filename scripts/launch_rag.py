@@ -85,6 +85,105 @@ class Response(BaseModel):
     status: int
     sources: list
 
+def get_arxiv_metadata(sn, md):
+    """ Get arxiv paper metadata """
+
+    # - Set arxiv id
+    # --- arXiv extraction & normalization ---
+    arxiv_raw = (
+        md.get("arxiv_id")
+        or md.get("arXiv")
+        or md.get("arxiv")
+        or md.get("eprint")
+        or md.get("identifier")
+    )
+    
+    arxiv_norm = None
+    if isinstance(arxiv_raw, str):
+        import re as _re
+        # strip leading "arXiv:" and try to capture 2011.07620 (ignore version)
+        s = _re.sub(r"^arXiv:\s*", "", arxiv_raw.strip(), flags=_re.IGNORECASE)
+        m = _re.search(r"(\d{4}\.\d{4,5})", s)
+        arxiv_norm = m.group(1) if m else s
+
+    # fallback: derive from file_name like 2011.07620v2.pdf
+    if not arxiv_norm:
+        fn = (md.get("file_name") or "").strip()
+        import re as _re
+        m = _re.search(r"(\d{4}\.\d{4,5})(?:v\d+)?\.pdf$", fn)
+        if m:
+            arxiv_norm = m.group(1)
+
+    arxiv_abs_url = f"https://arxiv.org/abs/{arxiv_norm}" if arxiv_norm else None
+    arxiv_pdf_url = f"https://arxiv.org/pdf/{arxiv_norm}.pdf" if arxiv_norm else None
+                
+    # - Set response source
+    source= {
+        "doctype": "arxiv",
+        "node_id": sn.node.node_id,
+        "score": sn.score,                     # similarity score
+        "file_path": md.get("file_path"),
+        "file_name": md.get("file_name"),
+        "page_label": md.get("page_label"),
+        # - Add custom metadata fields
+        "title": md.get("title"),
+        "paper_title": md.get("paper_title"),
+        "document_title": md.get("document_title"),
+        "authors": md.get("authors"),
+        "author": md.get("author"),
+        "first_author": md.get("first_author"),
+        "journal": md.get("journal"),
+        "journal_name": md.get("journal_name"),
+        "container_title": md.get("container_title"),
+        "publication": md.get("publication"),
+        "volume": md.get("volume"),
+        "issue": md.get("issue"),
+        "number": md.get("number"),
+        "pages": md.get("pages"),
+        "page": md.get("page"),
+        "year": md.get("year"),
+        "pub_year": md.get("pub_year"),
+        "date": md.get("date"),
+        "bibcode": md.get("bibcode"),
+        "doi": md.get("doi"),
+        "arxiv_id": arxiv_norm,
+        "arxiv_abs_url": arxiv_abs_url,
+        "arxiv_pdf_url": arxiv_pdf_url,
+        "text": sn.node.get_content(),
+    }
+    
+    return source
+
+
+def get_book_metadata(sn, md):
+    """ Get book metadata """
+    
+    # - Set response source
+    source= {
+        "doctype": "book",
+        "node_id": sn.node.node_id,
+        "score": sn.score,                     # similarity score
+        "file_path": md.get("file_path"),
+        "file_name": md.get("file_name"),
+        "page_label": md.get("page_label"),
+        # - Add custom metadata fields
+        "title": md.get("title"),
+        "subtitle": md.get("subtitle"),
+        "publisher": md.get("publisher"),
+        "year": md.get("year"),
+        "pages": md.get("pages"),
+        "authors": md.get("authors"),
+        "first_author": md.get("authors")[0],
+        "doi": md.get("doi"),
+        "isbn": md.get("isbn"),
+        "issn": md.get("issn"),
+        "url": md.get("url"),
+        "download_url": md.get("download_url"),
+        "text": sn.node.get_content(),
+    }
+    
+    return source
+
 ######################################
 ##    ARGS
 ######################################
@@ -98,6 +197,7 @@ def load_args():
     parser.add_argument("-embedding_model", "--embedding_model", type=str, required=False, default="mixedbread-ai/mxbai-embed-large-v1", help="Embedder model")
     parser.add_argument("-chunk_size", "--chunk_size", type=int, required=False, default=1024, help="Chunk size")
     parser.add_argument("-collection_name", "--collection_name", type=str, required=False, default="radiopapers", help="Collection name")
+    parser.add_argument("-collection_names", "--collection_names", type=str, required=False, default="radiopapers", help="Comma-separated list of Qdrant collection names to query across (overrides --collection_name)")
     parser.add_argument("-similarity_thr", "--similarity_thr", type=float, required=False, default=0.5, help="Similarity threshold")
     parser.add_argument("-llm", "--llm", type=str, required=False, default="", help="LLM model name")
     parser.add_argument("-llm_url", "--llm_url", type=str, required=False, default="http://localhost:11434", help="LLM ollama url")
@@ -222,75 +322,89 @@ def main():
                 print("--> md")
                 print(md)
                 
+                # - Check if source is a book
+                doctype= md.get("kind")
+                source= None
+                if doctype:
+                    if doctype=="book":
+                        # - Book
+                        source= get_book_metadata(sn, md)
+                    else:
+                        logger.warning(f"Unknown doctype parsed ({doctype}), skipping entry ...")
+                        continue
+                else:
+                    # - Arxiv paper
+                    source= get_arxiv_metadata(sn, md)
+                
+                if source is None:
+                    logger.warning("Response source parsed is still None, skipping entry ...")
+                    continue
+                    
+                # - Add response source to list
+                response_sources.append(source)
+                
                 # - Set arxiv id
                 # --- arXiv extraction & normalization ---
-                arxiv_raw = (
-                    md.get("arxiv_id")
-                    or md.get("arXiv")
-                    or md.get("arxiv")
-                    or md.get("eprint")
-                    or md.get("identifier")
-                )
-                arxiv_norm = None
-                if isinstance(arxiv_raw, str):
-                    import re as _re
-                    # strip leading "arXiv:" and try to capture 2011.07620 (ignore version)
-                    s = _re.sub(r"^arXiv:\s*", "", arxiv_raw.strip(), flags=_re.IGNORECASE)
-                    m = _re.search(r"(\d{4}\.\d{4,5})", s)
-                    arxiv_norm = m.group(1) if m else s
+                #arxiv_raw = (
+                #    md.get("arxiv_id")
+                #    or md.get("arXiv")
+                #    or md.get("arxiv")
+                #    or md.get("eprint")
+                #    or md.get("identifier")
+                #)
+                #arxiv_norm = None
+                #if isinstance(arxiv_raw, str):
+                #    import re as _re
+                #    # strip leading "arXiv:" and try to capture 2011.07620 (ignore version)
+                #    s = _re.sub(r"^arXiv:\s*", "", arxiv_raw.strip(), flags=_re.IGNORECASE)
+                #    m = _re.search(r"(\d{4}\.\d{4,5})", s)
+                #    arxiv_norm = m.group(1) if m else s
 
                 # fallback: derive from file_name like 2011.07620v2.pdf
-                if not arxiv_norm:
-                    fn = (md.get("file_name") or "").strip()
-                    import re as _re
-                    m = _re.search(r"(\d{4}\.\d{4,5})(?:v\d+)?\.pdf$", fn)
-                    if m:
-                        arxiv_norm = m.group(1)
+                #if not arxiv_norm:
+                #    fn = (md.get("file_name") or "").strip()
+                #    import re as _re
+                #    m = _re.search(r"(\d{4}\.\d{4,5})(?:v\d+)?\.pdf$", fn)
+                #    if m:
+                #        arxiv_norm = m.group(1)
 
-                arxiv_abs_url = f"https://arxiv.org/abs/{arxiv_norm}" if arxiv_norm else None
-                arxiv_pdf_url = f"https://arxiv.org/pdf/{arxiv_norm}.pdf" if arxiv_norm else None
+                #arxiv_abs_url = f"https://arxiv.org/abs/{arxiv_norm}" if arxiv_norm else None
+                #arxiv_pdf_url = f"https://arxiv.org/pdf/{arxiv_norm}.pdf" if arxiv_norm else None
                 
                 # - Set response sources
-                response_sources.append({
-                    "node_id": sn.node.node_id,
-                    "score": sn.score,                     # similarity score
-                    "file_path": md.get("file_path"),
-                    "file_name": md.get("file_name"),
-                    "page_label": md.get("page_label"),
-                    # pass through biblio fields if you have them:
-                    "title": md.get("title"),
-                    "paper_title": md.get("paper_title"),
-                    "document_title": md.get("document_title"),
-                    "authors": md.get("authors"),
-                    "author": md.get("author"),
-                    "first_author": md.get("first_author"),
-                    "journal": md.get("journal"),
-                    "journal_name": md.get("journal_name"),
-                    "container_title": md.get("container_title"),
-                    "publication": md.get("publication"),
-                    "volume": md.get("volume"),
-                    "issue": md.get("issue"),
-                    "number": md.get("number"),
-                    "pages": md.get("pages"),
-                    "page": md.get("page"),
-                    "year": md.get("year"),
-                    "pub_year": md.get("pub_year"),
-                    "date": md.get("date"),
-                    "bibcode": md.get("bibcode"),
-                    "doi": md.get("doi"),
-                    "arxiv_id": arxiv_norm,
-                    "arxiv_abs_url": arxiv_abs_url,
-                    "arxiv_pdf_url": arxiv_pdf_url,
-                    "text": sn.node.get_content(),
-                })
-                
                 #response_sources.append({
                 #    "node_id": sn.node.node_id,
                 #    "score": sn.score,                     # similarity score
+                #    "file_path": md.get("file_path"),
+                #    "file_name": md.get("file_name"),
+                #    "page_label": md.get("page_label"),
+                #    # pass through biblio fields if you have them:
+                #    "title": md.get("title"),
+                #    "paper_title": md.get("paper_title"),
+                #    "document_title": md.get("document_title"),
+                #    "authors": md.get("authors"),
+                #    "author": md.get("author"),
+                #    "first_author": md.get("first_author"),
+                #    "journal": md.get("journal"),
+                #    "journal_name": md.get("journal_name"),
+                #    "container_title": md.get("container_title"),
+                #    "publication": md.get("publication"),
+                #    "volume": md.get("volume"),
+                #    "issue": md.get("issue"),
+                #    "number": md.get("number"),
+                #    "pages": md.get("pages"),
+                #    "page": md.get("page"),
+                #    "year": md.get("year"),
+                #    "pub_year": md.get("pub_year"),
+                #    "date": md.get("date"),
+                #    "bibcode": md.get("bibcode"),
+                #    "doi": md.get("doi"),
+                #    "arxiv_id": arxiv_norm,
+                #    "arxiv_abs_url": arxiv_abs_url,
+                #    "arxiv_pdf_url": arxiv_pdf_url,
                 #    "text": sn.node.get_content(),
-                #    **(sn.node.metadata or {}),            # file_path, page_label, etc.
                 #})
-
+                
             print("response_sources")
             print(response_sources)
 
