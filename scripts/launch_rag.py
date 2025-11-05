@@ -22,6 +22,7 @@ from llama_index.llms.ollama import Ollama
 from llama_index.core.postprocessor import SimilarityPostprocessor
 from llama_index.core.tools import QueryEngineTool
 from llama_index.core.query_engine import RouterQueryEngine
+from llama_index.core.selectors import PydanticSingleSelector, PydanticMultiSelector, LLMMultiSelector
 
 # - Import FastAPI
 import uvicorn
@@ -239,9 +240,8 @@ def load_args():
     parser.add_argument("--llm_thinking", dest="llm_thinking", action='store_true',help='Enable LLM thinking (default=False)')	
     parser.set_defaults(llm_thinking=False)
     parser.add_argument("-qdrant_url", "--qdrant_url", type=str, required=False, default="http://localhost:6333", help="QDRant URL")
-    parser.add_argument("-select_top_k", "--select_top_k", type=int, required=False, default=10, help="Max number of collection source tools used in multi-source retrieval")
+    #parser.add_argument("-select_top_k", "--select_top_k", type=int, required=False, default=10, help="Max number of collection source tools used in multi-source retrieval")
     
-
     logger.info("Parsing arguments ...")
     args = parser.parse_args()
 
@@ -359,10 +359,10 @@ def main():
                     )    
         
                 # Let the LLM route/merge across collections; select_top_k lets it pick multiple sources
-                query_engine = RouterQueryEngine.from_defaults(
+                query_engine = RouterQueryEngine(
                     llm=rag.llm,
+                    selector=PydanticMultiSelector.from_defaults(),
                     query_engine_tools=tools,
-                    select_top_k=args.select_top_k,
                     verbose=True,
                 )
 
