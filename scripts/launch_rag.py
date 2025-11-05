@@ -51,6 +51,7 @@ class RAG:
         self.chunk_size= chunk_size
         self.collection_name= collection_name
         self.qdrant_url=qdrant_url
+        self.collection_names= collection_names
         #self.qdrant_client = qdrant_client.QdrantClient(url=qdrant_url)
 
     def load_embedder(self):
@@ -232,7 +233,7 @@ def load_args():
     parser.add_argument("--llm_thinking", dest="llm_thinking", action='store_true',help='Enable LLM thinking (default=False)')	
     parser.set_defaults(llm_thinking=False)
     parser.add_argument("-qdrant_url", "--qdrant_url", type=str, required=False, default="http://localhost:6333", help="QDRant URL")
-    parser.add_argument("-select_top_k", "--select_top_k", type=int, required=False, default=10, help="Max number of retrieved entries in multi-source retrieval")
+    parser.add_argument("-select_top_k", "--select_top_k", type=int, required=False, default=10, help="Max number of collection source tools used in multi-source retrieval")
     
 
     logger.info("Parsing arguments ...")
