@@ -345,57 +345,55 @@ def main():
             else:
                 # Build a tool per collection with the same retrieval settings
                 # NB: Some LLM models (e.g. Deepseek does not support tools, so we switched to a different strategy
-                try:
-                    tools = []
-                    for cname, idx in indices.items():
-                        eng = idx.as_query_engine(
-                            similarity_top_k=query.similarity_top_k,
-                            response_mode="tree_summarize",
-                            include_metadata=True,
-                            node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=args.similarity_thr)],
-                            verbose=True,
-                        )
-                        desc = collection_descriptions.get(cname, f"Qdrant collection '{cname}'")
-                        tools.append(
-                            QueryEngineTool.from_defaults(
-                                query_engine=eng,
-                                description=desc
-                            )
-                        )    
+                
+                #tools = []
+                #for cname, idx in indices.items():
+                #    eng = idx.as_query_engine(
+                #        similarity_top_k=query.similarity_top_k,
+                #        response_mode="tree_summarize",
+                #        include_metadata=True,
+                #        node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=args.similarity_thr)],
+                #        verbose=True,
+                #    )
+                #    desc = collection_descriptions.get(cname, f"Qdrant collection '{cname}'")
+                #    tools.append(
+                #        QueryEngineTool.from_defaults(
+                #            query_engine=eng,
+                #            description=desc
+                #        )
+                #    )    
         
-                    # Let the LLM route/merge across collections; select_top_k lets it pick multiple sources
-                    query_engine = RouterQueryEngine(
-                        llm=rag.llm,
-                        selector=PydanticMultiSelector.from_defaults(),
-                        query_engine_tools=tools,
-                        verbose=True,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to run router query engine (err={str(e)}), trying with query fusion retriever ...")
+                # Let the LLM route/merge across collections; select_top_k lets it pick multiple sources
+                #query_engine = RouterQueryEngine(
+                #    llm=rag.llm,
+                #    selector=PydanticMultiSelector.from_defaults(),
+                #    query_engine_tools=tools,
+                #    verbose=True,
+                #)
                     
-                    retrievers = [
-                        idx.as_retriever(similarity_top_k=query.similarity_top_k)
-                        for idx in indices.values()
-                    ]
+                retrievers = [
+                    idx.as_retriever(similarity_top_k=query.similarity_top_k)
+                    for idx in indices.values()
+                ]
 
-                    # - Fuse results (simple union + dedupe; 1 query => no query expansion)
-                    fusion = QueryFusionRetriever(
-                        retrievers=retrievers,
-                        similarity_top_k=query.similarity_top_k,  # per-retriever top_k
-                        num_queries=1,                             # keep 1 to disable expansion
-                        # mode="reciprocal_rerank",                # optional: stronger RRF re-ranking
-                        use_async=True,
-                        verbose=True,
-                    )
+                # - Fuse results (simple union + dedupe; 1 query => no query expansion)
+                fusion = QueryFusionRetriever(
+                    retrievers=retrievers,
+                    similarity_top_k=query.similarity_top_k,  # per-retriever top_k
+                    num_queries=1,                             # keep 1 to disable expansion
+                    # mode="reciprocal_rerank",                # optional: stronger RRF re-ranking
+                    use_async=True,
+                    verbose=True,
+                )
 
-                    # - Wrap in a QueryEngine
-                    query_engine = RetrieverQueryEngine.from_args(     
-                        fusion,
-                        response_mode="tree_summarize",      # synthesis strategy
-                        include_metadata=True,               # preserve node metadata
-                        output=Response,
-                        node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=args.similarity_thr)],
-                    )
+                # - Wrap in a QueryEngine
+                query_engine = RetrieverQueryEngine.from_args(     
+                    fusion,
+                    response_mode="tree_summarize",      # synthesis strategy
+                    include_metadata=True,               # preserve node metadata
+                    output=Response,
+                    node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=args.similarity_thr)],
+                )
                     
         except Exception as e:
             logger.error(f"Failed to retrieve query engine (err={str(e)})!")
