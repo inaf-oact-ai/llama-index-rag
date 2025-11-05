@@ -20,6 +20,8 @@ from llama_index.vector_stores.qdrant import QdrantVectorStore
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.ollama import Ollama
 from llama_index.core.postprocessor import SimilarityPostprocessor
+from llama_index.core.tools import QueryEngineTool
+from llama_index.core.query_engine import RouterQueryEngine
 
 # - Import FastAPI
 import uvicorn
@@ -40,7 +42,8 @@ class RAG:
         embedding_model,
         chunk_size,
         collection_name,
-        qdrant_url
+        qdrant_url,
+        collection_names=None
     ):
         """ RAG class constructor"""
         self.llm = llm  # ollama llm
@@ -74,6 +77,28 @@ class RAG:
             vector_store=qdrant_vector_store, settings=Settings
         )
         return index
+
+    def qdrant_indices(self):
+        """Build an index per Qdrant collection (multi-source)."""
+        logger.info(f"Create qdrant client (url={self.qdrant_url}) ...")
+        client = qdrant_client.QdrantClient(url=self.qdrant_url)
+
+        logger.info("Create settings ...")
+        Settings.llm = self.llm
+        Settings.embed_model = self.load_embedder()
+        Settings.chunk_size = self.chunk_size
+
+        logger.info("Retrieve index ...")
+        indices = {}
+        for cname in self.collection_names:
+            logger.info(f"Create QdrantVectorStore (collection_name={cname}) ...")
+            vs = QdrantVectorStore(client=client, collection_name=cname)
+            
+            logger.info("Retrieve index ...")
+            idx = VectorStoreIndex.from_vector_store(vector_store=vs, settings=Settings)
+            indices[cname] = idx
+            
+        return indices
 
 class Query(BaseModel):
     query: str
@@ -207,6 +232,8 @@ def load_args():
     parser.add_argument("--llm_thinking", dest="llm_thinking", action='store_true',help='Enable LLM thinking (default=False)')	
     parser.set_defaults(llm_thinking=False)
     parser.add_argument("-qdrant_url", "--qdrant_url", type=str, required=False, default="http://localhost:6333", help="QDRant URL")
+    parser.add_argument("-select_top_k", "--select_top_k", type=int, required=False, default=10, help="Max number of retrieved entries in multi-source retrieval")
+    
 
     logger.info("Parsing arguments ...")
     args = parser.parse_args()
@@ -222,6 +249,13 @@ def main():
     # - Parse args
     logger.info("Loading args ...")
     args= load_args()
+    
+    # - Set single- or multi-collection
+    multi_mode = False
+    collections = None
+    if args.collection_names:
+        collections = [c.strip() for c in args.collection_names.split(",") if c.strip()]
+        multi_mode = len(collections) > 0
 
     # - Load model
     logger.info(f"Loading model {args.llm} ...")
@@ -245,12 +279,18 @@ def main():
         embedding_model=args.embedding_model,
         chunk_size=args.chunk_size,
         collection_name=args.collection_name,
-        qdrant_url=args.qdrant_url
+        qdrant_url=args.qdrant_url,
+        collection_names=collections
     )
 
-    logger.info(f"RAG indexing ...")
-    index = rag.qdrant_index()
-    logger.info(f"index: {index}")
+    if multi_mode:
+        logger.info("RAG: building multi-collection indices ...")
+        indices = rag.qdrant_indices()
+        logger.info(f"indices: {list(indices.keys())}")
+    else:
+        logger.info("RAG indexing (single collection) ...")
+        index = rag.qdrant_index()
+        logger.info(f"index: {index}")
 
     # - Create web app
     logger.info("Creating web app ...")
@@ -268,20 +308,61 @@ def main():
     def search(query: Query):
 
         logger.info(f"Received query: {query}")
+        #try:
+        #    query_engine = index.as_query_engine(
+        #        similarity_top_k=query.similarity_top_k,
+        #        output=Response,
+        #        response_mode="tree_summarize",
+        #        include_metadata=True,
+        #        node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=args.similarity_thr)],
+        #        verbose=True,
+        #    )
+        #except Exception as e:
+        #    logger.error(f"Failed to retrieve query engine (err={str(e)})!")
+        #    err_resp= Response(status=-1, search_result="Failed to retrieve query engine", sources=[], content_found=False)
+        #    return err_resp   
+            
         try:
-            query_engine = index.as_query_engine(
-                similarity_top_k=query.similarity_top_k,
-                output=Response,
-                response_mode="tree_summarize",
-                include_metadata=True,
-                node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=args.similarity_thr)],
-                verbose=True,
-            )
+            if not multi_mode:
+                query_engine = index.as_query_engine(
+                    similarity_top_k=query.similarity_top_k,
+                    output=Response,
+                    response_mode="tree_summarize",
+                    include_metadata=True,
+                    node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=args.similarity_thr)],
+                    verbose=True,
+                )
+            else:
+                # Build a tool per collection with the same retrieval settings
+                tools = []
+                for cname, idx in indices.items():
+                    eng = idx.as_query_engine(
+                        similarity_top_k=query.similarity_top_k,
+                        response_mode="tree_summarize",
+                        include_metadata=True,
+                        node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=args.similarity_thr)],
+                        verbose=True,
+                    )
+                    tools.append(
+                        QueryEngineTool.from_defaults(
+                            query_engine=eng,
+                            description=f"Qdrant collection '{cname}'"
+                        )
+                    )
+        
+                # Let the LLM route/merge across collections; select_top_k lets it pick multiple sources
+                query_engine = RouterQueryEngine.from_defaults(
+                    llm=rag.llm,
+                    query_engine_tools=tools,
+                    select_top_k=args.select_top_k,
+                    verbose=True,
+                )
+
         except Exception as e:
             logger.error(f"Failed to retrieve query engine (err={str(e)})!")
-            err_resp= Response(status=-1, search_result="Failed to retrieve query engine", sources=[], content_found=False)
-            return err_resp
-
+            err_resp = Response(status=-1, search_result="Failed to retrieve query engine", sources=[], content_found=False)
+            return err_resp    
+            
         # - Run query
         logger.info("Querying engine ...")
         try:
@@ -290,7 +371,8 @@ def main():
             logger.error(f"Failed to run query engine (err={str(e)})!")
             err_resp= Response(status=-1, search_result="Failed to query engine", sources=[], content_found=False)
             return err_resp
-
+            
+         
         # - Parsing response
         logger.info(f"Parsing response: {response} ...")
         try:
