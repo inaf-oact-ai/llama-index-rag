@@ -33,6 +33,9 @@ from ingest_book import (
     build_index_from_vector_store,
 )
 
+# ---- qdrant
+import qdrant_client
+
 logger = structlog.get_logger()
 
 # ---------- XML parsing helpers ----------
