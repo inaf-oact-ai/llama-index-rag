@@ -3,12 +3,26 @@
 
 import argparse
 import os
-import glob
 import json
+import structlog
+from typing import List, Iterable, Optional, Any, Dict
+import traceback
+import glob
 import re
 import structlog
 import xml.etree.ElementTree as ET
-from typing import Dict, Any, List, Optional, Tuple
+
+# ---- llama-index
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.vector_stores.qdrant import QdrantVectorStore
+from llama_index.core import (
+    SimpleDirectoryReader,
+    StorageContext,
+    VectorStoreIndex,
+    Settings,
+)
+from llama_index.core.embeddings import BaseEmbedding
+from llama_index.core.node_parser import SentenceSplitter
 
 # ---- reuse your existing pipeline (unchanged)
 # We import the helpers & main ingest function plumbing from your script.
@@ -18,7 +32,6 @@ from ingest_book import (
     embed_nodes_resilient,
     build_index_from_vector_store,
 )
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
 logger = structlog.get_logger()
 
