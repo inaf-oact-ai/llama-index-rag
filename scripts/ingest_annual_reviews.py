@@ -189,7 +189,7 @@ def build_metadata_json_from_xmls(
         # - Match PDF and XML metadata    
         pdf_path = match_pdf_for_article(meta, pdf_index)
         if not pdf_path:
-            logger.debug("No PDF match for DOI=%s title=%s", meta.get("doi"), meta.get("title"))
+            #logger.debug("No PDF match for DOI=%s title=%s", meta.get("doi"), meta.get("title"))
             continue
             
         found=True
