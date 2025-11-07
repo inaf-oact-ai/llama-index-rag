@@ -222,7 +222,7 @@ def build_metadata_json_from_xmls(
         }
             
         # drop Nones
-        md = {k: v for k, v in entry.items() if v not in (None, "", [], {})}
+        md = {k: v for k, v in md.items() if v not in (None, "", [], {})}
         break
         
             
