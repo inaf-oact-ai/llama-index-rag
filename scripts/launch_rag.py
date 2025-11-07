@@ -219,6 +219,39 @@ def get_book_metadata(sn, md):
     }
     
     return source
+    
+def get_annreview_metadata(sn, md):
+    """ Get book metadata """
+    
+    # - Set response source
+    source= {
+        "doctype": "annual-review",
+        "node_id": sn.node.node_id,
+        "score": sn.score,                     # similarity score
+        "file_path": md.get("file_path"),
+        "file_name": md.get("file_name"),
+        "page_label": md.get("page_label"),
+        # - Add custom metadata fields
+        "title": md.get("title"),
+        "publisher": md.get("publisher"),
+        "journal": md.get("journal"),
+        "volume": md.get("volume"),
+        "issue": md.get("issue"),
+        "year": md.get("year"),
+        "month": md.get("month"),
+        "pages": md.get("pages"),
+        "authors": md.get("authors"),
+        "first_author": md.get("authors")[0],
+        "doi": md.get("doi"),
+        "issn": md.get("issn"),
+        "keywords": md.get("keywords"),
+        "publication_type": md.get("publication_type"),
+        "url": md.get("url"),
+        "download_url": md.get("download_url"),
+        "text": sn.node.get_content(),
+    }
+    
+    return source
 
 ######################################
 ##    ARGS
@@ -233,7 +266,7 @@ def load_args():
     parser.add_argument("-embedding_model", "--embedding_model", type=str, required=False, default="mixedbread-ai/mxbai-embed-large-v1", help="Embedder model")
     parser.add_argument("-chunk_size", "--chunk_size", type=int, required=False, default=1024, help="Chunk size")
     parser.add_argument("-collection_name", "--collection_name", type=str, required=False, default="radiopapers", help="Collection name")
-    parser.add_argument("-collection_names", "--collection_names", type=str, required=False, default="radiopapers", help="Comma-separated list of Qdrant collection names to query across (overrides --collection_name)")
+    parser.add_argument("-collection_names", "--collection_names", type=str, required=False, default="radiopapers,radiobooks,annreviews", help="Comma-separated list of Qdrant collection names to query across (overrides --collection_name)")
     parser.add_argument("-similarity_thr", "--similarity_thr", type=float, required=False, default=0.5, help="Similarity threshold")
     parser.add_argument("-llm", "--llm", type=str, required=False, default="", help="LLM model name")
     parser.add_argument("-llm_url", "--llm_url", type=str, required=False, default="http://localhost:11434", help="LLM ollama url")
@@ -445,9 +478,10 @@ def main():
                 doctype= md.get("kind")
                 source= None
                 if doctype:
-                    if doctype=="book":
-                        # - Book
+                    if doctype=="book": # Book
                         source= get_book_metadata(sn, md)
+                    elif doctype=="annual-review": # Annual Review
+                        source= get_annreview_metadata(sn, md)
                     else:
                         logger.warning(f"Unknown doctype parsed ({doctype}), skipping entry ...")
                         continue

@@ -297,6 +297,52 @@ def format_book_authors(authors: list[str]) -> str:
         return f"{formatted_first} et al."
 
 
+def format_annreview_author(name: str) -> str:
+    """
+    Format a single author string like:
+        "Matt A. White" -> "M.A. White"
+        "John D. P. Smith" -> "J.D.P. Smith"
+        "M. D. Filipovic" -> "M.D. Filipovic"
+        "Maria J. de Souza" -> "M.J. de Souza"
+    """
+    if not name or not isinstance(name, str):
+        return ""
+
+    parts = name.strip().split()
+    if len(parts) == 0:
+        return ""
+
+    # Assume surname is last token; handle lowercase prefixes like "de", "van", "von"
+    surname_parts = []
+    given_parts = []
+    for token in reversed(parts):
+        if token[0].islower():  # part of surname prefix
+            surname_parts.insert(0, token)
+        elif not surname_parts:  # first uppercase-start word from the end → start surname
+            surname_parts.insert(0, token)
+        else:
+            given_parts.insert(0, token)
+
+    surname = " ".join(surname_parts)
+    initials = ""
+    for g in given_parts:
+        # extract first letter if alphabetic
+        if len(g) > 0 and g[0].isalpha():
+            initials += g[0].upper() + "."
+        # handle tokens already like "A." (keep as "A.")
+        elif re.match(r"^[A-Z]\.$", g):
+            initials += g
+    return f"{initials} {surname}".strip()
+
+def format_annreview_authors(authors: list[str]) -> str:
+    """ Format annual review authors """
+    if not authors:
+        return ""
+    authors_bookformat = [format_author_name(a) for a in authors if a]
+    authors_formatted= format_book_authors(authors_bookformat)
+
+    return authors_formatted
+
 ######################################
 ##     APP BODY
 ######################################
@@ -429,6 +475,18 @@ if submitted:
                 
                 # - Retrieve download link (if available)
                 download_url= meta.get("download_url")
+                
+            elif doctype=="annual-review":
+                # - Extract author & citation
+                author = meta.get("first_author")
+                authors = format_annreview_authors(meta.get("authors"))
+                citation = _journal_citation(meta)  # title, journal, vol(issue), pages, year
+
+                # - Retrieve URL
+                url= meta.get("url")
+                
+                # - Retrieve download link (if available)
+                download_url= meta.get("download_url")  
                 
             else:
                 print(f"WARN: Unknown doctype retrieved {doctype}, will set empty link field!")
