@@ -338,7 +338,7 @@ def format_annreview_authors(authors: list[str]) -> str:
     """ Format annual review authors """
     if not authors:
         return ""
-    authors_bookformat = [format_author_name(a) for a in authors if a]
+    authors_bookformat = [format_annreview_author(a) for a in authors if a]
     authors_formatted= format_book_authors(authors_bookformat)
 
     return authors_formatted
