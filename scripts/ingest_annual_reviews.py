@@ -5,7 +5,7 @@ import argparse
 import os
 import json
 import structlog
-from typing import List, Iterable, Optional, Any, Dict
+from typing import List, Iterable, Optional, Any, Dict, Tuple
 import traceback
 import glob
 import re
