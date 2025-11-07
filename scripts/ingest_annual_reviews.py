@@ -371,7 +371,10 @@ def main():
     xml_files = sorted(glob.glob(os.path.join(args.xml_dir, "*.xml")))
     
     logger.info(f"Parsing all XML metadata found (n={len(xml_files)}) ...")
-    xml_metadata_list= [parse_issue_xml(xf) for xf in xml_files]
+    xml_metadata_list= []
+    for xf in xml_files:
+        meta_xml= parse_issue_xml(xf) # this is a list
+        xml_metadata_list.extend(meta_xml)
    
     # - Build metadata dict
     pdf_dir = os.path.dirname(args.pdf_path)
