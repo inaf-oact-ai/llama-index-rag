@@ -334,9 +334,6 @@ def parse_bib_file(path: str) -> List[Dict[str, Any]]:
             "url": url,
         }
         
-        print("meta")
-        print(meta)
-        
         metas.append(_prune_empties(meta))
     return metas
 
@@ -426,6 +423,12 @@ def ingest_annreviews(
 
     input_files = [md.get("filepath")]
     logger.info("Preparing %d PDF(s) listed in metadata ...", len(input_files))
+
+
+    print("file_metadata_fn")
+    print(file_metadata_fn)
+    sys.exit(0)
+
 
     documents = SimpleDirectoryReader(
         input_files=input_files,
@@ -545,8 +548,7 @@ def main():
     print(pdf_index)
     print("md")
     print(md)
-    sys.exit(0)
-
+    
     logger.info("Loading embedder model %s ...", args.embedding_model)
     embed_model = HuggingFaceEmbedding(model_name=args.embedding_model, trust_remote_code=True)
 
