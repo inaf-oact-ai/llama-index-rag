@@ -415,7 +415,7 @@ def build_metadata_from_bib(
             "url": url,
             "download_url": None,
         }
-        md = _prune_empties(md)
+        #md = _prune_empties(md)
         break
 
     if not md:
