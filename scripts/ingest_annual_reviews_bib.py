@@ -544,6 +544,7 @@ def main():
     ap.add_argument("--embedding_model", default="mixedbread-ai/mxbai-embed-large-v1")
     ap.add_argument("--chunk_size", type=int, default=1024)
     ap.add_argument("--use_safe_embedder", action="store_true", default=False)
+    ap.add_argument("--dryrun", action="store_true", default=False)
     args = ap.parse_args()
 
     logger.info("Parsing BibTeX metadata from %s ...", args.bib_dir)
@@ -560,6 +561,9 @@ def main():
     print(pdf_index)
     print("md")
     print(md)
+    if args.dryrun:
+        logger.info("Not uploading file as in dryrun mode ...")
+        sys.exit(0)
     
     logger.info("Loading embedder model %s ...", args.embedding_model)
     embed_model = HuggingFaceEmbedding(model_name=args.embedding_model, trust_remote_code=True)
