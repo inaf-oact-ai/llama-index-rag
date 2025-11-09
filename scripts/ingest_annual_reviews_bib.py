@@ -71,12 +71,12 @@ def match_pdf_for_article(meta: Dict[str, Any], pdf_index: Dict[str, str]) -> Op
                 return p
     return None
 
-# -------------------- BibTeX parsing (supports repeated fields) --------------------
+# -------------------- BibTeX parsing (entry splitter) --------------------
 
 ENTRY_START_RE = re.compile(r'@\w+\s*\{', re.IGNORECASE)
-FIELD_RE = re.compile(r'(\w+)\s*=\s*(.+?)(?:(?<!\\),\s*|\s*\}\s*$)', re.DOTALL)
 
 def split_bib_entries(text: str) -> List[str]:
+    """Split a .bib file into raw entry blocks (brace-depth aware)."""
     entries, i, n = [], 0, len(text)
     while True:
         m = ENTRY_START_RE.search(text, i)
@@ -98,48 +98,176 @@ def split_bib_entries(text: str) -> List[str]:
         i = j
     return entries
 
-def unquote_bib_value(v: str) -> str:
-    v = v.strip().rstrip(',')
-    if v and v[0] in ['"', '{'] and v[-1] in ['"', '}']:
-        v = v[1:-1]
-    return re.sub(r'\s+', ' ', v).strip()
+# -------------------- NEW: quote/brace-aware field parser --------------------
 
-def parse_bib_entry(block: str) -> Dict[str, Any]:
+def _skip_ws(s: str, i: int) -> int:
+    n = len(s)
+    while i < n and s[i].isspace():
+        i += 1
+    return i
+
+def _read_key(s: str, i: int) -> Tuple[Optional[str], int]:
+    i = _skip_ws(s, i)
+    n = len(s)
+    start = i
+    while i < n and (s[i].isalnum() or s[i] in "_-"):
+        i += 1
+    if i == start:
+        return None, i
+    return s[start:i].lower(), _skip_ws(s, i)
+
+def _expect_char(s: str, i: int, ch: str) -> int:
+    i = _skip_ws(s, i)
+    if i < len(s) and s[i] == ch:
+        return _skip_ws(s, i + 1)
+    return i  # be permissive; upstream BibTeX often has minor formatting quirks
+
+def _read_quoted(s: str, i: int) -> Tuple[str, int]:
+    # assumes s[i] == '"'
+    i += 1
+    out = []
+    n = len(s)
+    esc = False
+    brace_depth = 0  # braces may appear inside quotes in BibTeX
+    while i < n:
+        c = s[i]
+        if esc:
+            out.append(c)
+            esc = False
+        elif c == '\\':
+            esc = True
+        elif c == '{':
+            brace_depth += 1
+            out.append(c)
+        elif c == '}':
+            if brace_depth > 0:
+                brace_depth -= 1
+            out.append(c)
+        elif c == '"':
+            if brace_depth == 0:
+                i += 1
+                break
+            else:
+                out.append(c)
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out).strip(), _skip_ws(s, i)
+
+def _read_braced(s: str, i: int) -> Tuple[str, int]:
+    # assumes s[i] == '{'
+    i += 1
+    out = []
+    n = len(s)
+    depth = 1
+    esc = False
+    while i < n and depth > 0:
+        c = s[i]
+        if esc:
+            out.append(c)
+            esc = False
+        elif c == '\\':
+            esc = True
+            out.append(c)
+        elif c == '{':
+            depth += 1
+            out.append(c)
+        elif c == '}':
+            depth -= 1
+            if depth > 0:
+                out.append(c)
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out).strip(), _skip_ws(s, i)
+
+def _read_bare(s: str, i: int) -> Tuple[str, int]:
+    # until next comma or end-of-entry '}' (but not counting commas in nested braces/quotes)
+    out = []
+    n = len(s)
+    while i < n and s[i] not in ',}':
+        out.append(s[i])
+        i += 1
+    return "".join(out).strip(), _skip_ws(s, i)
+
+def parse_bib_fields(block: str) -> Dict[str, Any]:
     """
-    Parse a single entry, accumulating repeated fields into lists.
-    Example: multiple 'keywords' lines -> {'keywords': ['k1','k2',...]}
+    Quote/brace-aware parser for fields inside a single @entry{...}.
+    Accumulates repeated keys into lists (e.g., keywords).
     """
+    # find start of field list: after first '{' and the first comma that ends the key part
+    lbrace = block.find('{')
+    if lbrace < 0:
+        return {}
+    # skip entry key up to the first comma after '{'
+    i = lbrace + 1
+    depth = 1
+    n = len(block)
+    while i < n and block[i] != ',':
+        # entry key may contain slashes/colons; just scan to comma
+        i += 1
+    i += 1  # move past that comma
     fields: Dict[str, Any] = {}
-    for m in FIELD_RE.finditer(block):
-        key = m.group(1).strip().lower()
-        val = unquote_bib_value(m.group(2))
+    while i < n:
+        i = _skip_ws(block, i)
+        if i >= n or block[i] == '}':
+            break
+        key, i2 = _read_key(block, i)
+        if not key:
+            # skip until next comma or closing brace
+            while i < n and block[i] not in ',}':
+                i += 1
+            if i < n and block[i] == ',':
+                i += 1
+            continue
+        i = _expect_char(block, i2, '=')
+        i = _skip_ws(block, i)
+        if i < n and block[i] == '"':
+            val, i = _read_quoted(block, i)
+        elif i < n and block[i] == '{':
+            val, i = _read_braced(block, i)
+        else:
+            val, i = _read_bare(block, i)
+
+        # accumulate repeats (e.g., repeated 'keywords' lines)
         if key in fields:
-            # accumulate repeats
             if isinstance(fields[key], list):
                 fields[key].append(val)
             else:
                 fields[key] = [fields[key], val]
         else:
             fields[key] = val
+
+        # optional trailing comma after a field
+        i = _skip_ws(block, i)
+        if i < n and block[i] == ',':
+            i += 1
     return fields
+
+# -------------------- higher-level mapping --------------------
 
 def parse_bib_authors(author_field: Optional[str]) -> List[str]:
     """
-    Convert BibTeX author string into list of display names:
-    - supports 'Last, First Middle and Last, First' (your attached files)
-    - also supports 'First Last and First Last'
-    Output format: 'First Middle Last'
+    Convert BibTeX 'author' into list of display names "First M. Last".
+    Handles:
+      - "Last, First Middle and Last, First M."
+      - "First Middle Last and First Last"
     """
     if not author_field:
         return []
-    parts = [a.strip() for a in author_field.split(" and ") if a.strip()]
+    # split on ' and ' outside braces (rarely used in these files, but safe)
+    parts = [a.strip() for a in re.split(r'\s+and\s+', author_field) if a.strip()]
     out = []
     for a in parts:
-        if "," in a:
-            last, rest = a.split(",", 1)
-            name = (rest.strip() + " " + last.strip()).strip()
+        # strip stray surrounding quotes/braces if present
+        a = a.strip().strip('{}"')
+        if ',' in a:
+            last, rest = a.split(',', 1)
+            last = last.strip()
+            rest = re.sub(r'\s+', ' ', rest).strip()
+            name = (rest + " " + last).strip()
         else:
-            name = a
+            name = re.sub(r'\s+', ' ', a).strip()
         out.append(name)
     return out
 
@@ -150,39 +278,42 @@ def parse_bib_file(path: str) -> List[Dict[str, Any]]:
     entries = split_bib_entries(text)
     metas: List[Dict[str, Any]] = []
     for block in entries:
-        fdict = parse_bib_entry(block)
+        fdict = parse_bib_fields(block)
 
-        # basic fields
-        title   = fdict.get("title")
-        journal = fdict.get("journal")
-        year    = fdict.get("year")
-        volume  = fdict.get("volume")
-        number  = fdict.get("number")  # often "Volume 53, 2015" in these files
-        pages   = fdict.get("pages")
-        doi     = normalize_doi(fdict.get("doi"))
-        url     = fdict.get("url")
+        title     = fdict.get("title")
+        journal   = fdict.get("journal")
+        year      = fdict.get("year")
+        volume    = fdict.get("volume")
+        number    = fdict.get("number")  # often "Volume 53, 2015"
+        pages     = fdict.get("pages")
+        doi       = normalize_doi(fdict.get("doi"))
+        url       = fdict.get("url")
         publisher = fdict.get("publisher")
-        issn    = fdict.get("issn")
-        pub_type = fdict.get("type")
-        abstract = fdict.get("abstract")
+        issn      = fdict.get("issn")
+        pub_type  = fdict.get("type")
+        abstract  = fdict.get("abstract")
 
-        # keywords can be a single string OR a list of strings (repeated fields)
+        # authors
+        authors   = parse_bib_authors(fdict.get("author"))
+
+        # keywords: can be repeated fields (list) or single string with delimiters
         kw_raw = fdict.get("keywords")
         if isinstance(kw_raw, list):
-            keywords = [k.strip() for k in kw_raw if k and k.strip()]
+            # some lines contain multiple keywords separated by ';' or ','
+            tmp = []
+            for k in kw_raw:
+                k = k.strip().strip('{}"')
+                tmp.extend([t.strip() for t in re.split(r'[;,]', k) if t.strip()])
+            keywords = tmp or None
         elif isinstance(kw_raw, str):
-            # allow comma/semicolon separated inside a single field
-            keywords = [k.strip() for k in re.split(r'[;,]', kw_raw) if k.strip()]
+            s = kw_raw.strip().strip('{}"')
+            keywords = [t.strip() for t in re.split(r'[;,]', s) if t.strip()] or None
         else:
             keywords = None
 
-        # normalize issue: only keep a clean integer; ignore strings like "Volume 53, 2015"
+        # normalize issue: keep only if purely numeric
         issue = number.strip() if isinstance(number, str) and number.strip().isdigit() else None
 
-        # authors
-        authors = parse_bib_authors(fdict.get("author"))
-
-        # map to our internal normalized meta
         meta = {
             "kind": "annual-review",
             "publisher": publisher,
@@ -191,7 +322,7 @@ def parse_bib_file(path: str) -> List[Dict[str, Any]]:
             "volume": volume,
             "issue": issue,
             "year": year,
-            "month": None,  # not present in .bib
+            "month": None,  # not present in these .bib files
             "title": title,
             "first_page": pages.split("-")[0] if isinstance(pages, str) and "-" in pages else (pages or None),
             "last_page":  pages.split("-")[1] if isinstance(pages, str) and "-" in pages else None,
@@ -199,7 +330,7 @@ def parse_bib_file(path: str) -> List[Dict[str, Any]]:
             "authors": authors,
             "doi": doi,
             "keywords": keywords,
-            "abstract": abstract,
+            "abstract": abstract.strip() if isinstance(abstract, str) else None,
             "url": url,
         }
         metas.append(_prune_empties(meta))
@@ -217,10 +348,6 @@ def build_metadata_from_bib(
     bib_metadata_list: List[Dict[str, Any]],
     pdf_index: Dict[str, str],
 ) -> Dict[str, Any]:
-    """
-    Match bib metadata to target PDF(s) and return a SINGLE md dict,
-    preserving the same field names used downstream (aligns with XML/arXiv path).
-    """
     md: Dict[str, Any] = {}
     for meta in bib_metadata_list:
         pdf_path = match_pdf_for_article(meta, pdf_index)
@@ -238,7 +365,6 @@ def build_metadata_from_bib(
 
         url = meta.get("url") or (f"https://doi.org/{meta['doi']}" if meta.get("doi") else None)
 
-        # final metadata object — field names mirror your arXiv/XML consumption
         md = {
             "kind": meta.get("kind"),
             "filepath": pdf_path,
@@ -248,7 +374,7 @@ def build_metadata_from_bib(
             "authors": authors,
             "first_author": first_author,
 
-            # bibliographic bundle (b.* in your code)
+            # bibliographic bundle (b.*)
             "b": {
                 "journal": meta.get("journal"),
                 "volume": meta.get("volume"),
@@ -261,7 +387,7 @@ def build_metadata_from_bib(
                 "publication_type": meta.get("publication_type"),
             },
 
-            # identifiers bundle (ids.* in your code)
+            # identifiers bundle (ids.*)
             "ids": {
                 "doi": meta.get("doi"),
                 "arxiv_id": None,
@@ -409,7 +535,6 @@ def main():
     md = build_metadata_from_bib(bib_metadata_list, pdf_index)
     if not md:
         raise RuntimeError("No PDFs matched to BibTeX metadata. Check DOI/filename.")
-
 
     print(f"pdf file: {args.pdf_path}")
     print("pdf_index")
