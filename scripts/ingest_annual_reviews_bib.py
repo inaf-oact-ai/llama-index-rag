@@ -376,24 +376,38 @@ def build_metadata_from_bib(
             "first_author": first_author,
 
             # bibliographic bundle (b.*)
-            "b": {
-                "journal": meta.get("journal"),
-                "volume": meta.get("volume"),
-                "issue": meta.get("issue"),
-                "pages": pages_fmt,
-                "year": meta.get("year"),
-                "month": meta.get("month"),
-                "publisher": meta.get("publisher"),
-                "issn": meta.get("issn"),
-                "publication_type": meta.get("publication_type"),
-            },
-
+            #"b": {
+            #    "journal": meta.get("journal"),
+            #    "volume": meta.get("volume"),
+            #    "issue": meta.get("issue"),
+            #    "pages": pages_fmt,
+            #    "year": meta.get("year"),
+            #    "month": meta.get("month"),
+            #    "publisher": meta.get("publisher"),
+            #    "issn": meta.get("issn"),
+            #    "publication_type": meta.get("publication_type"),
+            #},
+            
+            "journal": meta.get("journal"),
+            "volume": meta.get("volume"),
+            "issue": meta.get("issue"),
+            "pages": pages_fmt,
+            "year": meta.get("year"),
+            "month": meta.get("month"),
+            "publisher": meta.get("publisher"),
+            "issn": meta.get("issn"),
+            "publication_type": meta.get("publication_type"),
+            
             # identifiers bundle (ids.*)
-            "ids": {
-                "doi": meta.get("doi"),
-                "arxiv_id": None,
-                "bibcode": None,
-            },
+            #"ids": {
+            #    "doi": meta.get("doi"),
+            #    "arxiv_id": None,
+            #    "bibcode": None,
+            #},
+            
+            "doi": meta.get("doi"),
+            #"arxiv_id": None,
+            #"bibcode": None,
 
             # extras
             "keywords": meta.get("keywords"),
