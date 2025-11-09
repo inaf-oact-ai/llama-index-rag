@@ -333,6 +333,10 @@ def parse_bib_file(path: str) -> List[Dict[str, Any]]:
             "abstract": abstract.strip() if isinstance(abstract, str) else None,
             "url": url,
         }
+        
+        print("meta")
+        print(meta)
+        
         metas.append(_prune_empties(meta))
     return metas
 
