@@ -438,11 +438,9 @@ def ingest_annreviews(
     input_files = [md.get("filepath")]
     logger.info("Preparing %d PDF(s) listed in metadata ...", len(input_files))
 
-
-    print("md")
-    print(md)
-    sys.exit(0)
-
+    #print("md")
+    #print(md)
+    #sys.exit(0)
 
     documents = SimpleDirectoryReader(
         input_files=input_files,
@@ -557,7 +555,7 @@ def main():
     if not md:
         raise RuntimeError("No PDFs matched to BibTeX metadata. Check DOI/filename.")
 
-    print(f"pdf file: {args.pdf_path}")
+    #print(f"pdf file: {args.pdf_path}")
     print("pdf_index")
     print(pdf_index)
     print("md")
