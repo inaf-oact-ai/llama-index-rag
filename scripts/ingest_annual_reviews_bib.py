@@ -425,8 +425,8 @@ def ingest_annreviews(
     logger.info("Preparing %d PDF(s) listed in metadata ...", len(input_files))
 
 
-    print("file_metadata_fn")
-    print(file_metadata_fn)
+    print("md")
+    print(md)
     sys.exit(0)
 
 
