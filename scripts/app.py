@@ -519,7 +519,7 @@ if submitted:
             
             st.markdown(
                 #f"<div class='ref-line'><strong>{i}. {display_name}</strong>{extra_html} • "
-                f"<div class='ref-line'>{i}) <strong> {authors} </strong>, {extra_html} — "
+                f"<div class='ref-line'>[{i}] <strong> {authors} </strong>, {extra_html} — "
                 f"score {score_html} "
                 + (f" • {link_html}" if link_html else "")
                 + (f" • {download_html}" if download_html else "")
