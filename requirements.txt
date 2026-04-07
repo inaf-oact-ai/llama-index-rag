@@ -2,6 +2,9 @@ llama-index
 llama-index-embeddings-huggingface
 llama-index-llms-ollama
 llama-index-vector-stores-qdrant
+llama-index-llms-vllm
+vllm
+llama-index-llms-openai-like
 qdrant-client
 structlog
 pydantic

@@ -253,6 +253,65 @@ def get_annreview_metadata(sn, md):
     
     return source
 
+
+def build_llm(args):
+  """Build a LlamaIndex-compatible LLM from CLI args."""
+
+  logger.info(f"Building LLM backend={args.llm_backend}, model={args.llm} ...")
+
+  #=========================
+  #      OLLAMA
+  #=========================
+  if args.llm_backend == "ollama":
+    return Ollama(
+      model=args.llm,
+      base_url=args.llm_url,
+      request_timeout=args.llm_timeout,
+      context_window=args.llm_ctx_window,
+      keep_alive=args.llm_keep_alive,
+      thinking=args.llm_thinking,
+    )
+    
+  #=========================
+  #      VLLM (LOCAL)
+  #=========================
+  elif args.llm_backend == "vllm":
+    # Direct local vLLM integration
+    # Requires: pip install llama-index-llms-vllm vllm
+    return Vllm(
+      model=args.llm,
+      temperature=args.llm_temperature,
+      max_new_tokens=args.llm_max_new_tokens,
+      tensor_parallel_size=args.llm_tensor_parallel_size,
+      # Extra native vLLM params go here
+      vllm_kwargs={
+        # Example:
+        # "gpu_memory_utilization": 0.9,
+        # "max_model_len": args.llm_ctx_window,
+      },
+    )
+
+  #=========================
+  #      VLLM (API/REMOTE)
+  #=========================
+  elif args.llm_backend == "vllm-openai":
+    # vLLM served with: vllm serve <model> ...
+    # Requires: pip install llama-index-llms-openai-like
+    return OpenAILike(
+      model=args.llm,
+      api_base=args.llm_url.rstrip("/") + "/v1",
+      api_key=args.llm_api_key,
+      is_chat_model=args.llm_is_chat_model,
+      is_function_calling_model=args.llm_is_function_calling_model,
+      context_window=args.llm_ctx_window,
+      max_tokens=args.llm_max_new_tokens,
+      temperature=args.llm_temperature,
+      timeout=float(args.llm_timeout),
+    )
+
+  else:
+    raise ValueError(f"Unsupported llm_backend={args.llm_backend}")
+
 ######################################
 ##    ARGS
 ######################################
@@ -278,6 +337,17 @@ def load_args():
     parser.add_argument("-qdrant_url", "--qdrant_url", type=str, required=False, default="http://localhost:6333", help="QDRant URL")
     parser.add_argument("-num_queries", "--num_queries", type=int, required=False, default=1, help="For multi-source aggregation, set to 1 to disable extra augmented queries")
     
+    parser.add_argument("--llm_backend", type=str, default="ollama", choices=["ollama", "vllm", "vllm-openai"], help="LLM backend: ollama, vllm (local Python), or vllm-openai (OpenAI-compatible vLLM server)")
+    parser.add_argument("--llm_api_key", type=str, default="dummy", help="API key for OpenAI-compatible backends (vLLM server can use a dummy value if auth is disabled or arbitrary token if required)")
+    parser.add_argument("--llm_max_new_tokens", type=int, default=512, help="Maximum number of generated tokens")
+    parser.add_argument("--llm_temperature", type=float, default=0.1, help="Generation temperature") 
+    parser.add_argument("--llm_tensor_parallel_size", type=int, default=1, help="Tensor parallel size for local vLLM backend")
+    parser.add_argument("--llm_is_chat_model", dest="llm_is_chat_model", action="store_true", help="Use chat-completions style API for OpenAI-compatible backends")
+    parser.set_defaults(llm_is_chat_model=True)
+    parser.add_argument("--llm_is_function_calling_model", dest="llm_is_function_calling_model", action="store_true", help="Whether the backend supports tool/function calling")
+    parser.set_defaults(llm_is_function_calling_model=False)
+ 
+
     logger.info("Parsing arguments ...")
     args = parser.parse_args()
 
@@ -301,19 +371,22 @@ def main():
         multi_mode = len(collections) > 0
 
     # - Load model
-    logger.info(f"Loading model {args.llm} ...")
-    llm = Ollama(
-      model=args.llm,
-      base_url=args.llm_url,
-      request_timeout=args.llm_timeout,
-      context_window=args.llm_ctx_window,
-      keep_alive=args.llm_keep_alive,
-      thinking=args.llm_thinking,
-      #additional_kwargs={
-      #    "num_ctx": 4096,
-      #    "num_batch": 128
-      #}
-    )
+    #logger.info(f"Loading model {args.llm} ...")
+    #llm = Ollama(
+    #  model=args.llm,
+    #  base_url=args.llm_url,
+    #  request_timeout=args.llm_timeout,
+    #  context_window=args.llm_ctx_window,
+    #  keep_alive=args.llm_keep_alive,
+    #  thinking=args.llm_thinking,
+    #  #additional_kwargs={
+    #  #    "num_ctx": 4096,
+    #  #    "num_batch": 128
+    #  #}
+    #)
+
+    logger.info(f"Loading model {args.llm} with backend {args.llm_backend} ...")
+    llm = build_llm(args)
 
     # - Create RAG
     logger.info(f"Creating RAG served by previously loaded model ...")
