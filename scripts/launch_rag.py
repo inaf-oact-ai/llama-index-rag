@@ -37,6 +37,37 @@ import qdrant_client
 logger = structlog.get_logger()
 
 #############################
+##    HELPERS
+#############################
+def _safe_first_author(value):
+    if isinstance(value, list) and value:
+        return value[0]
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+    
+def _metadata_file_path(md):
+    return md.get("file_path") or md.get("filepath")
+
+def _source_collection(sn, md):
+    return (
+        md.get("_collection_name")
+        or md.get("collection")
+        or md.get("collection_name")
+    )
+
+def _node_text(sn):
+    try:
+        return sn.node.get_content() or ""
+    except Exception:
+        return ""
+
+
+def _node_id(sn):
+    md = sn.node.metadata or {}
+    return getattr(sn.node, "node_id", None) or md.get("node_id") or md.get("id_")
+
+#############################
 ##    RAG CLASS
 #############################
 collection_descriptions = {
@@ -79,7 +110,8 @@ class RAG:
         )
 
         logger.info("Create settings ...")
-        Settings.llm = self.llm
+        if self.llm is not None:
+            Settings.llm = self.llm
         Settings.embed_model = self.load_embedder()
         Settings.chunk_size = self.chunk_size
 
@@ -95,7 +127,8 @@ class RAG:
         client = qdrant_client.QdrantClient(url=self.qdrant_url)
 
         logger.info("Create settings ...")
-        Settings.llm = self.llm
+        if self.llm is not None:
+            Settings.llm = self.llm
         Settings.embed_model = self.load_embedder()
         Settings.chunk_size = self.chunk_size
 
@@ -120,6 +153,122 @@ class Response(BaseModel):
     content_found: bool
     status: int
     sources: list
+    
+class RetrieveRequest(BaseModel):
+    query: str
+    similarity_top_k: Optional[int] = Field(default=8, ge=1, le=100)
+    collections: Optional[list[str]] = None
+    similarity_thr: Optional[float] = None
+    num_queries: Optional[int] = None
+    response_mode: Optional[str] = "no_text"
+    include_text: bool = True
+
+class RetrievedDocument(BaseModel):
+    doc_id: str
+    title: Optional[str] = None
+    text: str = ""
+    score: Optional[float] = None
+    collection: Optional[str] = None
+    metadata: dict = Field(default_factory=dict)
+
+class RetrieveResponse(BaseModel):
+    status: int
+    message: str = "ok"
+    content_found: bool
+    documents: list[RetrievedDocument] = Field(default_factory=list)
+    debug: dict = Field(default_factory=dict)    
+
+
+def source_to_retrieved_document(source: dict) -> RetrievedDocument:
+    original_metadata = dict(source.get("metadata") or {})
+
+    metadata = dict(original_metadata)
+    for key, value in source.items():
+        if key not in {"text", "metadata"}:
+            metadata.setdefault(key, value)
+
+    doc_id = (
+        source.get("node_id")
+        or source.get("doc_id")
+        or source.get("source_id")
+        or source.get("doi")
+        or source.get("arxiv_id")
+        or source.get("file_name")
+        or "unknown"
+    )
+
+    collection = (
+        source.get("collection")
+        or source.get("_collection_name")
+        or source.get("collection_name")
+        or metadata.get("collection")
+        or metadata.get("_collection_name")
+    )
+
+    title = (
+        source.get("title")
+        or source.get("paper_title")
+        or source.get("document_title")
+        or source.get("file_name")
+        or str(doc_id)
+    )
+
+    return RetrievedDocument(
+        doc_id=str(doc_id),
+        title=title,
+        text=str(source.get("text") or ""),
+        score=source.get("score"),
+        collection=collection,
+        metadata=metadata,
+    )
+
+
+def source_from_node(sn):
+    md = sn.node.metadata or {}
+    logger.debug("Parsed source metadata", metadata=md)
+
+    doctype = md.get("kind")
+    source = None
+
+    if doctype:
+        if doctype == "book": # Book
+            source = get_book_metadata(sn, md)
+        elif doctype == "annual-review": # Annual Review
+            source = get_annreview_metadata(sn, md)
+        else: # - Arxiv paper
+            logger.warning(f"Unknown doctype parsed ({doctype}), treating as generic/arxiv-like entry ...")
+            source = get_arxiv_metadata(sn, md)
+    else:
+        source = get_arxiv_metadata(sn, md)
+
+    if source is None:
+        return None
+
+    # Preserve collection hints if available.
+    source["collection"] = (
+        md.get("_collection_name")
+        or md.get("collection")
+        or source.get("collection")
+    )
+
+    # Preserve all original node metadata for MAASAI.
+    source["metadata"] = dict(md)
+
+    return source
+
+
+def sources_from_nodes(source_nodes):
+    response_sources = []
+
+    for sn in source_nodes or []:
+        source = source_from_node(sn)
+        if source is None:
+            logger.warning("Response source parsed is None, skipping entry ...")
+            continue
+        response_sources.append(source)
+
+    return response_sources
+
 
 def get_arxiv_metadata(sn, md):
     """ Get arxiv paper metadata """
@@ -158,7 +307,8 @@ def get_arxiv_metadata(sn, md):
         "doctype": "arxiv",
         "node_id": sn.node.node_id,
         "score": sn.score,                     # similarity score
-        "file_path": md.get("file_path"),
+        #"file_path": md.get("file_path"),
+        "file_path": _metadata_file_path(md),
         "file_name": md.get("file_name"),
         "page_label": md.get("page_label"),
         # - Add custom metadata fields
@@ -199,7 +349,8 @@ def get_book_metadata(sn, md):
         "doctype": "book",
         "node_id": sn.node.node_id,
         "score": sn.score,                     # similarity score
-        "file_path": md.get("file_path"),
+        #"file_path": md.get("file_path"),
+        "file_path": _metadata_file_path(md),
         "file_name": md.get("file_name"),
         "page_label": md.get("page_label"),
         # - Add custom metadata fields
@@ -209,7 +360,8 @@ def get_book_metadata(sn, md):
         "year": md.get("year"),
         "pages": md.get("pages"),
         "authors": md.get("authors"),
-        "first_author": md.get("authors")[0],
+        #"first_author": md.get("authors")[0],
+        "first_author": _safe_first_author(md.get("authors")),
         "doi": md.get("doi"),
         "isbn": md.get("isbn"),
         "issn": md.get("issn"),
@@ -228,7 +380,8 @@ def get_annreview_metadata(sn, md):
         "doctype": "annual-review",
         "node_id": sn.node.node_id,
         "score": sn.score,                     # similarity score
-        "file_path": md.get("file_path"),
+        #"file_path": md.get("file_path"),
+        "file_path": _metadata_file_path(md),
         "file_name": md.get("file_name"),
         "page_label": md.get("page_label"),
         # - Add custom metadata fields
@@ -241,7 +394,8 @@ def get_annreview_metadata(sn, md):
         "month": md.get("month"),
         "pages": md.get("pages"),
         "authors": md.get("authors"),
-        "first_author": md.get("authors")[0],
+        #"first_author": md.get("authors")[0],
+        "first_author": _safe_first_author(md.get("authors")),
         "doi": md.get("doi"),
         "issn": md.get("issn"),
         "keywords": md.get("keywords"),
@@ -254,63 +408,155 @@ def get_annreview_metadata(sn, md):
     return source
 
 
+
+def build_fusion_retriever(
+    indices: dict,
+    similarity_top_k: int,
+    num_queries: int,
+):
+    """ Build retriever """
+    retrievers = [
+        idx.as_retriever(similarity_top_k=similarity_top_k)
+        for idx in indices.values()
+    ]
+
+    return QueryFusionRetriever(
+        retrievers=retrievers,
+        similarity_top_k=similarity_top_k,
+        num_queries=num_queries,
+        use_async=False,
+        verbose=True,
+    )
+
+
+def build_query_engine(
+    index=None,
+    indices: dict | None = None,
+    multi_mode: bool = False,
+    similarity_top_k: int = 5,
+    similarity_thr: float = 0.5,
+    num_queries: int = 1,
+):
+    """ Build query engine """
+    if not multi_mode:
+        return index.as_query_engine(
+            similarity_top_k=similarity_top_k,
+            output=Response,
+            response_mode="tree_summarize",
+            include_metadata=True,
+            node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=similarity_thr)],
+            verbose=True,
+        )
+
+    fusion = build_fusion_retriever(
+        indices=indices,
+        similarity_top_k=similarity_top_k,
+        num_queries=num_queries,
+    )
+
+    return RetrieverQueryEngine.from_args(
+        fusion,
+        response_mode="tree_summarize",
+        include_metadata=True,
+        output=Response,
+        node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=similarity_thr)],
+    )
+
+
+def retrieve_source_nodes(
+    query_text: str,
+    index=None,
+    indices: dict | None = None,
+    multi_mode: bool = False,
+    similarity_top_k: int = 8,
+    similarity_thr: float = 0.5,
+    num_queries: int = 1,
+):
+    """ Retrieve source node """
+    if not multi_mode:
+        retriever = index.as_retriever(similarity_top_k=similarity_top_k)
+    else:
+        retriever = build_fusion_retriever(
+            indices=indices,
+            similarity_top_k=similarity_top_k,
+            num_queries=num_queries,
+        )
+
+    nodes = retriever.retrieve(query_text)
+
+    if similarity_thr is not None:
+        nodes = [
+            sn for sn in nodes
+            if sn.score is None or sn.score >= similarity_thr
+        ]
+
+    return nodes
+
+
+
 def build_llm(args):
-  """Build a LlamaIndex-compatible LLM from CLI args."""
+    """Build a LlamaIndex-compatible LLM from CLI args."""
 
-  logger.info(f"Building LLM backend={args.llm_backend}, model={args.llm} ...")
+    # - Check if LLM is really needed
+    if args.retrieval_only_no_llm:
+        logger.info("Retrieval-only mode: disabling LLM.")
+        return None
 
-  #=========================
-  #      OLLAMA
-  #=========================
-  if args.llm_backend == "ollama":
-    return Ollama(
-      model=args.llm,
-      base_url=args.llm_url,
-      request_timeout=args.llm_timeout,
-      context_window=args.llm_ctx_window,
-      keep_alive=args.llm_keep_alive,
-      thinking=args.llm_thinking,
-    )
-    
-  #=========================
-  #      VLLM (LOCAL)
-  #=========================
-  elif args.llm_backend == "vllm":
-    # Direct local vLLM integration
-    # Requires: pip install llama-index-llms-vllm vllm
-    return Vllm(
-      model=args.llm,
-      temperature=args.llm_temperature,
-      max_new_tokens=args.llm_max_new_tokens,
-      tensor_parallel_size=args.llm_tensor_parallel_size,
-      # Extra native vLLM params go here
-      vllm_kwargs={
-        # Example:
-        # "gpu_memory_utilization": 0.9,
-        # "max_model_len": args.llm_ctx_window,
-      },
-    )
+    logger.info(f"Building LLM backend={args.llm_backend}, model={args.llm} ...")
 
-  #=========================
-  #      VLLM (API/REMOTE)
-  #=========================
-  elif args.llm_backend == "vllm-openai":
-    # vLLM served with: vllm serve <model> ...
-    # Requires: pip install llama-index-llms-openai-like
-    return OpenAILike(
-      model=args.llm,
-      api_base=args.llm_url.rstrip("/") + "/v1",
-      api_key=args.llm_api_key,
-      is_chat_model=args.llm_is_chat_model,
-      is_function_calling_model=args.llm_is_function_calling_model,
-      context_window=args.llm_ctx_window,
-      max_tokens=args.llm_max_new_tokens,
-      temperature=args.llm_temperature,
-      timeout=float(args.llm_timeout),
-    )
+    #=========================
+    #      OLLAMA
+    #=========================
+    if args.llm_backend == "ollama":
+        return Ollama(
+            model=args.llm,
+            base_url=args.llm_url,
+            request_timeout=args.llm_timeout,
+            context_window=args.llm_ctx_window,
+            keep_alive=args.llm_keep_alive,
+            thinking=args.llm_thinking,
+        )
 
-  else:
-    raise ValueError(f"Unsupported llm_backend={args.llm_backend}")
+    #=========================
+    #      VLLM (LOCAL)
+    #=========================
+    elif args.llm_backend == "vllm":
+        # Direct local vLLM integration
+        # Requires: pip install llama-index-llms-vllm vllm
+        from llama_index.llms.vllm import Vllm
+        return Vllm(
+            model=args.llm,
+            temperature=args.llm_temperature,
+            max_new_tokens=args.llm_max_new_tokens,
+            tensor_parallel_size=args.llm_tensor_parallel_size,
+            # Extra native vLLM params go here
+            vllm_kwargs={
+                # Example:
+                # "gpu_memory_utilization": 0.9,
+                # "max_model_len": args.llm_ctx_window,
+            },
+        )
+
+    #=========================
+    #      VLLM (API/REMOTE)
+    #=========================
+    elif args.llm_backend == "vllm-openai":
+        # vLLM served with: vllm serve <model> ...
+        # Requires: pip install llama-index-llms-openai-like
+        from llama_index.llms.openai_like import OpenAILike
+        return OpenAILike(
+            model=args.llm,
+            api_base=args.llm_url.rstrip("/") + "/v1",
+            api_key=args.llm_api_key,
+            is_chat_model=args.llm_is_chat_model,
+            is_function_calling_model=args.llm_is_function_calling_model,
+            context_window=args.llm_ctx_window,
+            max_tokens=args.llm_max_new_tokens,
+            temperature=args.llm_temperature,
+            timeout=float(args.llm_timeout),
+        )
+    else:
+        raise ValueError(f"Unsupported llm_backend={args.llm_backend}")
 
 ######################################
 ##    ARGS
@@ -332,7 +578,7 @@ def load_args():
     parser.add_argument("-llm_ctx_window", "--llm_ctx_window", type=int, required=False, default=4096, help="LLM context window")
     parser.add_argument("-llm_timeout", "--llm_timeout", type=int, required=False, default=120, help="LLM response timeout in seconds")
     parser.add_argument("-llm_keep_alive", "--llm_keep_alive", type=str, required=False, default="0s", help="LLM keep alive model option. 0s means loaded for all the time duration. 1h means active for 1h")
-    parser.add_argument("--llm_thinking", dest="llm_thinking", action='store_true',help='Enable LLM thinking (default=False)')	
+    parser.add_argument("--llm_thinking", dest="llm_thinking", action='store_true',help='Enable LLM thinking (default=False)')
     parser.set_defaults(llm_thinking=False)
     parser.add_argument("-qdrant_url", "--qdrant_url", type=str, required=False, default="http://localhost:6333", help="QDRant URL")
     parser.add_argument("-num_queries", "--num_queries", type=int, required=False, default=1, help="For multi-source aggregation, set to 1 to disable extra augmented queries")
@@ -347,6 +593,9 @@ def load_args():
     parser.add_argument("--llm_is_function_calling_model", dest="llm_is_function_calling_model", action="store_true", help="Whether the backend supports tool/function calling")
     parser.set_defaults(llm_is_function_calling_model=False)
  
+    parser.add_argument("--retrieval_only_no_llm", dest="retrieval_only_no_llm", action="store_true", help="Start retrieval service without requiring an LLM. /api/retrieve works; /api/search may be disabled.")
+    parser.set_defaults(retrieval_only_no_llm=False)
+    parser.add_argument("--max_retrieve_top_k", type=int, default=100, help="Maximum top-k accepted by /api/retrieve.") 
 
     logger.info("Parsing arguments ...")
     args = parser.parse_args()
@@ -399,6 +648,9 @@ def main():
         collection_names=collections
     )
 
+    index = None
+    indices = {}
+    
     if multi_mode:
         logger.info("RAG: building multi-collection indices ...")
         indices = rag.qdrant_indices()
@@ -420,91 +672,42 @@ def main():
 
     query_instr = "You can only answer based on the provided context. If a response cannot be formed strictly using the context, politely say you don't have knowledge about that topic"
 
+    #######################################
+    ##     API SEARCH
+    #######################################    
     @app.post("/api/search", response_model=Response, status_code=200)
     def search(query: Query):
-
+    
         logger.info(f"Received query: {query}")
-        #try:
-        #    query_engine = index.as_query_engine(
-        #        similarity_top_k=query.similarity_top_k,
-        #        output=Response,
-        #        response_mode="tree_summarize",
-        #        include_metadata=True,
-        #        node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=args.similarity_thr)],
-        #        verbose=True,
-        #    )
-        #except Exception as e:
-        #    logger.error(f"Failed to retrieve query engine (err={str(e)})!")
-        #    err_resp= Response(status=-1, search_result="Failed to retrieve query engine", sources=[], content_found=False)
-        #    return err_resp   
-            
+    
+        # - Return if LLM was not defined
+        if rag.llm is None:
+            return Response(
+                status=-1,
+                search_result="/api/search requires an LLM. Start without --retrieval_only_no_llm.",
+                sources=[],
+                content_found=False,
+            )
+
+        # - Build query engine    
         try:
-            if not multi_mode:
-                query_engine = index.as_query_engine(
-                    similarity_top_k=query.similarity_top_k,
-                    output=Response,
-                    response_mode="tree_summarize",
-                    include_metadata=True,
-                    node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=args.similarity_thr)],
-                    verbose=True,
-                )
-            else:
-                # Build a tool per collection with the same retrieval settings
-                # NB: Some LLM models (e.g. Deepseek does not support tools, so we switched to a different strategy
-                
-                #tools = []
-                #for cname, idx in indices.items():
-                #    eng = idx.as_query_engine(
-                #        similarity_top_k=query.similarity_top_k,
-                #        response_mode="tree_summarize",
-                #        include_metadata=True,
-                #        node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=args.similarity_thr)],
-                #        verbose=True,
-                #    )
-                #    desc = collection_descriptions.get(cname, f"Qdrant collection '{cname}'")
-                #    tools.append(
-                #        QueryEngineTool.from_defaults(
-                #            query_engine=eng,
-                #            description=desc
-                #        )
-                #    )    
-        
-                # Let the LLM route/merge across collections; select_top_k lets it pick multiple sources
-                #query_engine = RouterQueryEngine(
-                #    llm=rag.llm,
-                #    selector=PydanticMultiSelector.from_defaults(),
-                #    query_engine_tools=tools,
-                #    verbose=True,
-                #)
-                    
-                retrievers = [
-                    idx.as_retriever(similarity_top_k=query.similarity_top_k)
-                    for idx in indices.values()
-                ]
-
-                # - Fuse results (simple union + dedupe; 1 query => no query expansion)
-                fusion = QueryFusionRetriever(
-                    retrievers=retrievers,
-                    similarity_top_k=query.similarity_top_k,   # per-retriever top_k
-                    num_queries=args.num_queries,              # keep 1 to disable expansion
-                    # mode="reciprocal_rerank",                # optional: stronger RRF re-ranking
-                    use_async=False,
-                    verbose=True,
-                )
-
-                # - Wrap in a QueryEngine
-                query_engine = RetrieverQueryEngine.from_args(     
-                    fusion,
-                    response_mode="tree_summarize",      # synthesis strategy
-                    include_metadata=True,               # preserve node metadata
-                    output=Response,
-                    node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=args.similarity_thr)],
-                )
-                    
+            query_engine = build_query_engine(
+                index=index if not multi_mode else None,
+                indices=indices if multi_mode else None,
+                multi_mode=multi_mode,
+                similarity_top_k=query.similarity_top_k,
+                similarity_thr=args.similarity_thr,
+                num_queries=args.num_queries,
+            )
         except Exception as e:
             logger.error(f"Failed to retrieve query engine (err={str(e)})!")
-            err_resp = Response(status=-1, search_result="Failed to retrieve query engine", sources=[], content_found=False)
-            return err_resp    
+            err_resp = Response(
+                status=-1,
+                search_result="Failed to retrieve query engine",
+                sources=[],
+                content_found=False,
+            )
+            return err_resp
             
         # - Run query
         logger.info("Querying engine ...")
@@ -515,16 +718,9 @@ def main():
             err_resp= Response(status=-1, search_result="Failed to query engine", sources=[], content_found=False)
             return err_resp
             
-         
         # - Parsing response
         logger.info(f"Parsing response: {response} ...")
         try:
-            #search_result= str(response).strip()
-            #print("response.metadata")
-            #print(response.metadata)
-            #sources= [response.metadata[k]["file_path"] for k in response.metadata.keys()]
-            #source= sources[0]
-
             # - Retrieve the generated text
             response_text = getattr(response, "response", None) or getattr(response, "text", "")
             response_text = str(response_text).strip()
@@ -541,96 +737,7 @@ def main():
             print(f"content_found? {content_found}")
 
             # - Retrieve the chunks with similarity scores
-            response_sources = []
-            for sn in getattr(response, "source_nodes", []):
-                md = sn.node.metadata or {}
-                print("--> md")
-                print(md)
-                
-                # - Check if source is a book
-                doctype= md.get("kind")
-                source= None
-                if doctype:
-                    if doctype=="book": # Book
-                        source= get_book_metadata(sn, md)
-                    elif doctype=="annual-review": # Annual Review
-                        source= get_annreview_metadata(sn, md)
-                    else:
-                        logger.warning(f"Unknown doctype parsed ({doctype}), skipping entry ...")
-                        continue
-                else:
-                    # - Arxiv paper
-                    source= get_arxiv_metadata(sn, md)
-                
-                if source is None:
-                    logger.warning("Response source parsed is still None, skipping entry ...")
-                    continue
-                    
-                # - Add response source to list
-                response_sources.append(source)
-                
-                # - Set arxiv id
-                # --- arXiv extraction & normalization ---
-                #arxiv_raw = (
-                #    md.get("arxiv_id")
-                #    or md.get("arXiv")
-                #    or md.get("arxiv")
-                #    or md.get("eprint")
-                #    or md.get("identifier")
-                #)
-                #arxiv_norm = None
-                #if isinstance(arxiv_raw, str):
-                #    import re as _re
-                #    # strip leading "arXiv:" and try to capture 2011.07620 (ignore version)
-                #    s = _re.sub(r"^arXiv:\s*", "", arxiv_raw.strip(), flags=_re.IGNORECASE)
-                #    m = _re.search(r"(\d{4}\.\d{4,5})", s)
-                #    arxiv_norm = m.group(1) if m else s
-
-                # fallback: derive from file_name like 2011.07620v2.pdf
-                #if not arxiv_norm:
-                #    fn = (md.get("file_name") or "").strip()
-                #    import re as _re
-                #    m = _re.search(r"(\d{4}\.\d{4,5})(?:v\d+)?\.pdf$", fn)
-                #    if m:
-                #        arxiv_norm = m.group(1)
-
-                #arxiv_abs_url = f"https://arxiv.org/abs/{arxiv_norm}" if arxiv_norm else None
-                #arxiv_pdf_url = f"https://arxiv.org/pdf/{arxiv_norm}.pdf" if arxiv_norm else None
-                
-                # - Set response sources
-                #response_sources.append({
-                #    "node_id": sn.node.node_id,
-                #    "score": sn.score,                     # similarity score
-                #    "file_path": md.get("file_path"),
-                #    "file_name": md.get("file_name"),
-                #    "page_label": md.get("page_label"),
-                #    # pass through biblio fields if you have them:
-                #    "title": md.get("title"),
-                #    "paper_title": md.get("paper_title"),
-                #    "document_title": md.get("document_title"),
-                #    "authors": md.get("authors"),
-                #    "author": md.get("author"),
-                #    "first_author": md.get("first_author"),
-                #    "journal": md.get("journal"),
-                #    "journal_name": md.get("journal_name"),
-                #    "container_title": md.get("container_title"),
-                #    "publication": md.get("publication"),
-                #    "volume": md.get("volume"),
-                #    "issue": md.get("issue"),
-                #    "number": md.get("number"),
-                #    "pages": md.get("pages"),
-                #    "page": md.get("page"),
-                #    "year": md.get("year"),
-                #    "pub_year": md.get("pub_year"),
-                #    "date": md.get("date"),
-                #    "bibcode": md.get("bibcode"),
-                #    "doi": md.get("doi"),
-                #    "arxiv_id": arxiv_norm,
-                #    "arxiv_abs_url": arxiv_abs_url,
-                #    "arxiv_pdf_url": arxiv_pdf_url,
-                #    "text": sn.node.get_content(),
-                #})
-                
+            response_sources = sources_from_nodes(getattr(response, "source_nodes", []))
             print("response_sources")
             print(response_sources)
 
@@ -647,11 +754,125 @@ def main():
             )
         except Exception as e:
             logger.error(f"Failed to parse response (err={str(e)})!")
-            err_resp= Response(status=-1, search_result="Failed to parse response", sources=[])
+            err_resp = Response(
+                status=-1,
+                search_result="Failed to parse response",
+                sources=[],
+                content_found=False,
+            )
             return err_resp
 
         return response_object
 
+
+    
+    #######################################
+    ##     API RETRIEVE
+    #######################################  
+    @app.post("/api/retrieve", response_model=RetrieveResponse, status_code=200)
+    def retrieve(req: RetrieveRequest):
+        """ Retrieve endpoint """
+        logger.info(f"Received retrieval request: {req}")
+
+        try:
+            requested_collections = req.collections or collections
+            if requested_collections:
+                requested_collections = [
+                    c.strip()
+                    for c in requested_collections
+                    if isinstance(c, str) and c.strip()
+                ]
+
+            # If the request specifies a subset of collections, build a temporary
+            # subset view over already-loaded indices. This does not rebuild indices.
+            active_indices = indices
+            active_multi_mode = multi_mode
+
+            if requested_collections and multi_mode:
+                active_indices = {
+                    cname: idx
+                    for cname, idx in indices.items()
+                    if cname in requested_collections
+                }
+
+                if not active_indices:
+                    return RetrieveResponse(
+                        status=-1,
+                        message=f"No requested collections are available: {requested_collections}",
+                        content_found=False,
+                        documents=[],
+                        debug={
+                            "requested_collections": requested_collections,
+                            "available_collections": list(indices.keys()),
+                        },
+                    )
+
+                active_multi_mode = len(active_indices) > 1
+
+                if len(active_indices) == 1:
+                    active_index = next(iter(active_indices.values()))
+                else:
+                    active_index = None
+            else:
+                active_index = index if not multi_mode else None
+
+            top_k = req.similarity_top_k or 8
+            top_k = min(top_k, args.max_retrieve_top_k)
+            thr = args.similarity_thr if req.similarity_thr is None else req.similarity_thr
+            nq = args.num_queries if req.num_queries is None else req.num_queries
+
+            source_nodes = retrieve_source_nodes(
+                query_text=req.query,
+                index=active_index,
+                indices=active_indices if active_multi_mode else None,
+                multi_mode=active_multi_mode,
+                similarity_top_k=top_k,
+                similarity_thr=thr,
+                num_queries=nq,
+            )
+
+            sources = sources_from_nodes(source_nodes)
+
+            documents = [
+                source_to_retrieved_document(source)
+                for source in sources
+            ]
+
+            if not req.include_text:
+                for doc in documents:
+                    doc.text = ""
+                    doc.metadata.pop("text", None)
+
+            return RetrieveResponse(
+                status=0,
+                message="ok",
+                content_found=len(documents) > 0,
+                documents=documents,
+                debug={
+                    "query": req.query,
+                    "similarity_top_k": top_k,
+                    "similarity_thr": thr,
+                    "num_queries": nq,
+                    "multi_mode": active_multi_mode,
+                    "requested_collections": requested_collections,
+                    "available_collections": list(indices.keys()) if multi_mode else [args.collection_name],
+                    "returned": len(documents),
+                },
+            )
+
+        except Exception as e:
+            logger.error(f"Failed retrieval request (err={str(e)})!")
+            return RetrieveResponse(
+                status=-1,
+                message=f"Failed retrieval request: {str(e)}",
+                content_found=False,
+                documents=[],
+                debug={},
+            )
+
+    #####################################
+    ##      RUN SERVER
+    #####################################
     # - Running server
     logger.info("Running app ...")
     uvicorn.run(app, host=args.host, port=args.port)

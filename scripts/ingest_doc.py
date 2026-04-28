@@ -297,7 +297,7 @@ def ingest(
         
         # - Creating splitter
         logger.info("Creating sentence splitter ...")
-        splitter = SentenceSplitter(chunk_size=chunk_size)
+        splitter = SentenceSplitter(chunk_size=chunk_size)  #chunk_overlap=200 (default)
             
         # - Get nodes from documents
         logger.info("Getting nodes from documents ...")
