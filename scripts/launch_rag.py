@@ -62,10 +62,23 @@ def _node_text(sn):
     except Exception:
         return ""
 
-
 def _node_id(sn):
     md = sn.node.metadata or {}
     return getattr(sn.node, "node_id", None) or md.get("node_id") or md.get("id_")
+
+def _infer_collection_from_metadata(md):
+    fp = (md.get("file_path") or md.get("filepath") or "").lower()
+    fn = (md.get("file_name") or "").lower()
+    kind = md.get("kind")
+
+    if kind == "book":
+        return "radiobooks"
+    if kind == "annual-review":
+        return "annreviews"
+    if "radioimg-arxiv-dataset" in fp or fn.endswith(".pdf"):
+        return "radiopapers"
+
+    return None
 
 #############################
 ##    RAG CLASS
@@ -249,6 +262,7 @@ def source_from_node(sn):
         md.get("_collection_name")
         or md.get("collection")
         or source.get("collection")
+        or _infer_collection_from_metadata(md)
     )
 
     # Preserve all original node metadata for MAASAI.
