@@ -330,7 +330,7 @@ def crossref_to_metadata(item: Dict[str, Any], pdf_path: str, include_references
 		"html_url": html_url,
 		"download_url": pdf_url,
 
-		"abstract": clean_crossref_abstract(item.get("abstract")),
+		#"abstract": clean_crossref_abstract(item.get("abstract")),
 		"keywords": keywords,
 		"license": license_url,
 		"is_open_access": bool(license_url and "creativecommons.org" in license_url.lower()),
@@ -430,6 +430,33 @@ def ingest_living_reviews(
 	if bad:
 		logger.warning("%d invalid docs (empty/non-string text). Example: %s", len(bad), bad[0])
 	logger.info("#good/tot=%d/%d", len(good_documents), len(documents))
+
+	# Avoid injecting large metadata fields into the text passed to the splitter/embedder.
+	# The fields remain stored in document/node metadata payloads, but are not prepended
+	# to the text content used for chunking/embedding.
+	exclude_from_text = [
+		"abstract",
+		"author_orcids",
+		"funders",
+		"keywords",
+		"license",
+		"pdf_url",
+		"html_url",
+		"download_url",
+		"url",
+		"metadata_json_path",
+		"document_hash",
+		"references",
+	]
+
+	for d in good_documents:
+		d.excluded_embed_metadata_keys = list(
+			set(getattr(d, "excluded_embed_metadata_keys", []) + exclude_from_text)
+		)
+		d.excluded_llm_metadata_keys = list(
+			set(getattr(d, "excluded_llm_metadata_keys", []) + exclude_from_text)
+		)
+
 
 	logger.info("Creating qdrant store ...")
 	client = qdrant_client.QdrantClient(url=qdrant_url)
