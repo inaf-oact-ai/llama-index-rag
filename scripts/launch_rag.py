@@ -85,9 +85,16 @@ def _infer_collection_from_metadata(md):
 #############################
 collection_descriptions = {
     "radiopapers": "Scientific papers stored in ArXiV repository with subject keywords related to radio astronomy.",
-    "radiobooks": "Text books with subjects related to radio astronomy.",
+    "radiobooks": "Textbooks and monographs related to radio astronomy.",
+    "annreviews": "Annual Reviews articles and review papers relevant to astronomy and astrophysics.",
+    #"solar-papers": "Scientific papers stored in ArXiV repository with subject keywords related to radio astronomy.",
+    "solar-living-reviews": "Springer Living Reviews in Solar Physics articles",
 }
-
+DOMAIN_COLLECTIONS = {
+    "radio": ["radiopapers", "radiobooks", "annreviews"],
+    #"solar": ["solar-papers", "solar-living-reviews", "annreviews"],
+    "solar": ["solar-living-reviews", "annreviews"],
+}
 
 class RAG:
     def __init__(
@@ -160,6 +167,10 @@ class RAG:
 class Query(BaseModel):
     query: str
     similarity_top_k: Optional[int] = Field(default=1, ge=1, le=10)
+    domain: Optional[str] = None
+    collections: Optional[list[str]] = None
+    similarity_thr: Optional[float] = None
+    num_queries: Optional[int] = None 
 
 class Response(BaseModel):
     search_result: str
@@ -191,6 +202,47 @@ class RetrieveResponse(BaseModel):
     documents: list[RetrievedDocument] = Field(default_factory=list)
     debug: dict = Field(default_factory=dict)    
 
+
+def resolve_requested_collections(
+    requested_domain: Optional[str],
+    requested_collections: Optional[list[str]],
+    default_collections: Optional[list[str]],
+    available_collections: list[str],
+):
+    """
+    Resolve and validate the collection subset requested by the frontend.
+
+    Priority:
+    1. Explicit collections from request
+    2. Domain-level collection mapping
+    3. Backend startup default collections
+    """
+
+    if requested_collections:
+        resolved = [
+            c.strip()
+            for c in requested_collections
+            if isinstance(c, str) and c.strip()
+        ]
+    elif requested_domain:
+        if requested_domain not in DOMAIN_COLLECTIONS:
+            raise ValueError(
+                f"Unknown domain '{requested_domain}'. Available domains: {list(DOMAIN_COLLECTIONS.keys())}"
+            )
+        resolved = DOMAIN_COLLECTIONS[requested_domain]
+    else:
+        resolved = default_collections or available_collections
+
+    resolved = list(dict.fromkeys(resolved))
+
+    missing = [c for c in resolved if c not in available_collections]
+    if missing:
+        raise ValueError(
+            f"Requested collections are not loaded: {missing}. "
+            f"Available collections: {available_collections}"
+        )
+
+    return resolved
 
 def source_to_retrieved_document(source: dict) -> RetrievedDocument:
     original_metadata = dict(source.get("metadata") or {})
@@ -585,7 +637,8 @@ def load_args():
     parser.add_argument("-embedding_model", "--embedding_model", type=str, required=False, default="mixedbread-ai/mxbai-embed-large-v1", help="Embedder model")
     parser.add_argument("-chunk_size", "--chunk_size", type=int, required=False, default=1024, help="Chunk size")
     parser.add_argument("-collection_name", "--collection_name", type=str, required=False, default="radiopapers", help="Collection name")
-    parser.add_argument("-collection_names", "--collection_names", type=str, required=False, default="radiopapers,radiobooks,annreviews", help="Comma-separated list of Qdrant collection names to query across (overrides --collection_name)")
+    #parser.add_argument("-collection_names", "--collection_names", type=str, required=False, default="radiopapers,radiobooks,annreviews", help="Comma-separated list of Qdrant collection names to query across (overrides --collection_name)")
+    parser.add_argument("-collection_names", "--collection_names", type=str, required=False, default="radiopapers,radiobooks,annreviews,solar-living-reviews", help="Comma-separated list of Qdrant collection names to load at startup. Requests can dynamically select a subset.")
     parser.add_argument("-similarity_thr", "--similarity_thr", type=float, required=False, default=0.5, help="Similarity threshold")
     parser.add_argument("-llm", "--llm", type=str, required=False, default="", help="LLM model name")
     parser.add_argument("-llm_url", "--llm_url", type=str, required=False, default="http://localhost:11434", help="LLM ollama url")
@@ -703,16 +756,72 @@ def main():
                 content_found=False,
             )
 
+        # - Resolve requested collections
+        try:
+            available_collections = list(indices.keys()) if multi_mode else [args.collection_name]
+
+            requested_collections = resolve_requested_collections(
+                requested_domain=query.domain,
+                requested_collections=query.collections,
+                default_collections=collections,
+                available_collections=available_collections,
+            )
+
+            logger.info(
+                "Resolved search collections",
+                domain=query.domain,
+                requested_collections=requested_collections,
+                available_collections=available_collections,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to resolve requested collections (err={str(e)})!")
+            return Response(
+                status=-1,
+                search_result=f"Failed to resolve requested collections: {str(e)}",
+                sources=[],
+                content_found=False,
+            )
+
+        # - Select active indices without rebuilding them
+        active_index = index
+        active_indices = indices
+        active_multi_mode = multi_mode
+
+        if multi_mode:
+            active_indices = {
+                cname: idx
+                for cname, idx in indices.items()
+                if cname in requested_collections
+            }
+
+            if not active_indices:
+                return Response(
+                    status=-1,
+                    search_result=f"No requested collections are available: {requested_collections}",
+                    sources=[],
+                    content_found=False,
+                )
+
+            active_multi_mode = len(active_indices) > 1
+            active_index = None if active_multi_mode else next(iter(active_indices.values()))
+
         # - Build query engine    
         try:
             query_engine = build_query_engine(
-                index=index if not multi_mode else None,
-                indices=indices if multi_mode else None,
-                multi_mode=multi_mode,
+                #index=index if not multi_mode else None,
+                #indices=indices if multi_mode else None,
+                index=active_index if not active_multi_mode else None,
+                indices=active_indices if active_multi_mode else None,
+                #multi_mode=multi_mode,
+                multi_mode=active_multi_mode,
                 similarity_top_k=query.similarity_top_k,
-                similarity_thr=args.similarity_thr,
-                num_queries=args.num_queries,
+                #similarity_thr=args.similarity_thr,
+                similarity_thr=args.similarity_thr if query.similarity_thr is None else query.similarity_thr,
+                #num_queries=args.num_queries,
+                num_queries=args.num_queries if query.num_queries is None else query.num_queries
             )
+            
         except Exception as e:
             logger.error(f"Failed to retrieve query engine (err={str(e)})!")
             err_resp = Response(
@@ -789,13 +898,21 @@ def main():
         logger.info(f"Received retrieval request: {req}")
 
         try:
-            requested_collections = req.collections or collections
-            if requested_collections:
-                requested_collections = [
-                    c.strip()
-                    for c in requested_collections
-                    if isinstance(c, str) and c.strip()
-                ]
+            #requested_collections = req.collections or collections
+            #if requested_collections:
+            #    requested_collections = [
+            #        c.strip()
+            #        for c in requested_collections
+            #        if isinstance(c, str) and c.strip()
+            #    ]
+
+            available_collections = list(indices.keys()) if multi_mode else [args.collection_name]
+            requested_collections = resolve_requested_collections(
+                requested_domain=None,
+                requested_collections=req.collections,
+                default_collections=collections,
+                available_collections=available_collections,
+            )
 
             # If the request specifies a subset of collections, build a temporary
             # subset view over already-loaded indices. This does not rebuild indices.
@@ -869,7 +986,8 @@ def main():
                     "num_queries": nq,
                     "multi_mode": active_multi_mode,
                     "requested_collections": requested_collections,
-                    "available_collections": list(indices.keys()) if multi_mode else [args.collection_name],
+                    #"available_collections": list(indices.keys()) if multi_mode else [args.collection_name],
+                    "available_collections": available_collections,
                     "returned": len(documents),
                 },
             )

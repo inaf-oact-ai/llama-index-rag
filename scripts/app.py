@@ -16,7 +16,8 @@ import streamlit as st
 ######################################
 ##  PAGE CONFIG & LIGHT THEMING
 ######################################
-st.set_page_config(page_title="Radio RAG", page_icon="🔎", layout="wide")
+#st.set_page_config(page_title="Radio RAG", page_icon="🔎", layout="wide")
+st.set_page_config(page_title="Research RAG", page_icon="🔎", layout="wide")
 
 # [CHANGED] Global typography and layout improvements
 st.markdown(
@@ -74,19 +75,131 @@ st.markdown(
 ##  LOGO CONFIG
 ######################################
 # [CHANGED] use larger horizontal banner
-#BANNER_LOGO = "share/radioRAG_banner.png"
-#LOGO_URL = os.environ.get("RAG_LOGO_URL", BANNER_LOGO if os.path.exists(BANNER_LOGO) else None)
-LOGO_URL = os.environ.get(
-    "RAG_LOGO_URL",
-    "https://raw.githubusercontent.com/inaf-oact-ai/llama-index-rag/main/share/radioRAG_banner_v3.png"
-)
-print(f"LOGO_URL: {LOGO_URL}")
+####BANNER_LOGO = "share/radioRAG_banner.png"
+####LOGO_URL = os.environ.get("RAG_LOGO_URL", BANNER_LOGO if os.path.exists(BANNER_LOGO) else None)
+#LOGO_URL = os.environ.get(
+#    "RAG_LOGO_URL",
+#    "https://raw.githubusercontent.com/inaf-oact-ai/llama-index-rag/main/share/radioRAG_banner_v3.png"
+#)
+#print(f"LOGO_URL: {LOGO_URL}")
 
+
+
+######################################
+##  DOMAIN CONFIG
+######################################
+
+DOMAIN_CONFIG = {
+    "radio": {
+        "title": "Radio RAG",
+        "subtitle": "AI-powered Retrieval-Augmented Generation for Radio Astronomy",
+        "page_icon": "📡",
+        "logo_url": os.environ.get(
+            "RADIO_RAG_LOGO_URL",
+            "https://raw.githubusercontent.com/inaf-oact-ai/llama-index-rag/main/share/radioRAG_banner_v3.png",
+        ),
+        "collections": ["radiopapers", "radiobooks", "annreviews"],
+        "examples": [
+            "Can you explain the difference between ultra ultra-compact (UC) and hyper-compact (HC) HII regions? How many HC and UC HIIs are currently known in radio?",
+            "Do you know what is an Odd Radio Circle (ORC)? Describe its morphology and how they are detected in radio surveys.",
+            "Can you summarize how many Supernova Remnants (SNR) are currently known, what fraction of them are detected in the radio band?",
+        ],
+        "placeholder": "Ask about radio astronomy papers, books, and reviews…",
+    },
+    "solar": {
+        "title": "Solar RAG",
+        "subtitle": "AI-powered Retrieval-Augmented Generation for Solar Physics",
+        "page_icon": "☀️",
+        "logo_url": os.environ.get(
+            "SOLAR_RAG_LOGO_URL",
+            "https://raw.githubusercontent.com/inaf-oact-ai/llama-index-rag/main/share/solarRAG_banner_v1.png",
+        ),
+        "collections": ["solar-living-reviews", "annreviews"],
+        "examples": [
+            "What are the main observational signatures of solar flares?",
+            "How are CMEs related to Forbush decreases?",
+            "What features are commonly used for solar flare forecasting?",
+        ],
+        "placeholder": "Ask about solar physics papers and reviews…",
+    },
+}
+
+
+def get_domain_config(domain_key: str) -> dict:
+    """Return a domain configuration, falling back to radio."""
+    return DOMAIN_CONFIG.get(domain_key, DOMAIN_CONFIG["radio"])
+
+
+def render_domain_landing_page():
+    """Render the landing page used to select the RAG domain."""
+
+    st.markdown("<h1 style='text-align:center;'>Research RAG</h1>", unsafe_allow_html=True)
+    st.markdown(
+        "<p class='app-subtitle'>Select the scientific domain you want to query</p>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    cols = st.columns(len(DOMAIN_CONFIG))
+
+    for col, (domain_key, cfg) in zip(cols, DOMAIN_CONFIG.items()):
+        with col:
+            st.markdown(
+                f"""
+                <div style="
+                    border:1px solid #e5e7eb;
+                    border-radius:18px;
+                    padding:1.25rem;
+                    text-align:center;
+                    background:#ffffff;
+                    box-shadow:0 4px 14px rgba(15,23,42,0.08);
+                    min-height:320px;
+                ">
+                    <div style="font-size:48px;margin-bottom:0.5rem;">{cfg["page_icon"]}</div>
+                    <h2 style="margin-bottom:0.4rem;">{cfg["title"]}</h2>
+                    <p style="color:#64748b;font-size:17px;">{cfg["subtitle"]}</p>
+                    <p style="color:#475569;font-size:14px;">
+                        Collections: {", ".join(cfg["collections"])}
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            if st.button(f"Open {cfg['title']}", key=f"open_domain_{domain_key}", use_container_width=True):
+                st.session_state["selected_domain"] = domain_key
+                st.session_state.pop("prompt_seed", None)
+                st.session_state.pop("autosubmit", None)
+                st.rerun()
+
+######################################
+##  DOMAIN SELECTION
+######################################
+if "selected_domain" not in st.session_state:
+    render_domain_landing_page()
+
+    st.markdown(
+        "<hr style='margin-top:3em;margin-bottom:1em;'>"
+        "<p style='text-align:center;color:black;font-size:18px;'>"
+        "© 2025 S. Riggi – INAF"
+        "</p>",
+        unsafe_allow_html=True,
+    )
+
+    st.stop()
+
+DOMAIN_KEY = st.session_state["selected_domain"]
+DOMAIN = get_domain_config(DOMAIN_KEY)
+LOGO_URL = DOMAIN.get("logo_url")
+
+print(f"DOMAIN_KEY: {DOMAIN_KEY}")
+print(f"LOGO_URL: {LOGO_URL}")
+print(f"COLLECTIONS: {DOMAIN.get('collections')}")
 
 ######################################
 ##     SIDEBAR CONFIG
 ######################################
-
 st.sidebar.header("Backend Settings")
 API_BASE = st.sidebar.text_input(
     "API base URL",
@@ -97,6 +210,15 @@ API_BASE = st.sidebar.text_input(
 default_topk = int(os.environ.get("RAG_DEFAULT_TOPK", "5"))
 st.sidebar.caption("Tip: set RAG_API_URL / RAG_DEFAULT_TOPK env vars to change defaults.")
 
+st.sidebar.markdown("---")
+st.sidebar.caption(f"Current domain: **{DOMAIN['title']}**")
+st.sidebar.caption(f"Collections: `{', '.join(DOMAIN['collections'])}`")
+
+if st.sidebar.button("Change RAG domain"):
+    st.session_state.pop("selected_domain", None)
+    st.session_state.pop("prompt_seed", None)
+    st.session_state.pop("autosubmit", None)
+    st.rerun()
 
 ######################################
 ##  HEADER SECTION
@@ -128,16 +250,22 @@ with st.container():
 
     # [CHANGED] Banner centered and allowed to scale wide
     if LOGO_URL:
-        st.markdown(f"<div class='banner-wrap'><img src='{LOGO_URL}' alt='Radio RAG banner' /></div>", unsafe_allow_html=True) 
         #st.markdown(f"<div class='banner-wrap'><img src='{LOGO_URL}' alt='Radio RAG banner' /></div>", unsafe_allow_html=True)
-        #st.image(LOGO_URL, width=1000)
-        #st.image(LOGO_URL, use_container_width=True)
-        #st.markdown("<style>img {max-width:1600px !important;}</style>", unsafe_allow_html=True)
+        st.markdown(f"<div class='banner-wrap'><img src='{LOGO_URL}' alt='{DOMAIN['title']} banner' /></div>", unsafe_allow_html=True)
+        
+        ###st.markdown(f"<div class='banner-wrap'><img src='{LOGO_URL}' alt='Radio RAG banner' /></div>", unsafe_allow_html=True)
+        ###st.image(LOGO_URL, width=1000)
+        ###st.image(LOGO_URL, use_container_width=True)
+        ###st.markdown("<style>img {max-width:1600px !important;}</style>", unsafe_allow_html=True)
     else:
         st.markdown("<div style='font-size:40px'>🛰️</div>", unsafe_allow_html=True)
     
+    #st.markdown(
+    #    "<p class='app-subtitle'>AI-powered Retrieval-Augmented Generation for Radio Astronomy</p>",
+    #    unsafe_allow_html=True,
+    #)
     st.markdown(
-        "<p class='app-subtitle'>AI-powered Retrieval-Augmented Generation for Radio Astronomy</p>",
+        f"<p class='app-subtitle'>{DOMAIN['subtitle']}</p>",
         unsafe_allow_html=True,
     )
 
@@ -348,11 +476,13 @@ def format_annreview_authors(authors: list[str]) -> str:
 ######################################
 
 # --- Examples (click to auto-fill & submit) ---
-EXAMPLES = [
-    "Can you explain the difference between ultra ultra-compact (UC) and hyper-compact (HC) HII regions? How many HC and UC HIIs are currently known in radio?",
-    "Do you know what is an Odd Radio Circle (ORC)? Describe its morphology and how they are detected in radio surveys.",
-    "Can you summarize how many Supernova Remnants (SNR) are currently known, what fraction of them are detected in the radio band?"
-]
+#EXAMPLES = [
+#    "Can you explain the difference between ultra ultra-compact (UC) and hyper-compact (HC) HII regions? How many HC and UC HIIs are currently known in radio?",
+#    "Do you know what is an Odd Radio Circle (ORC)? Describe its morphology and how they are detected in radio surveys.",
+#    "Can you summarize how many Supernova Remnants (SNR) are currently known, what fraction of them are detected in the radio band?"
+#]
+
+EXAMPLES = DOMAIN["examples"]
 
 st.info("Enter a question and click *Search*. Below, you find some examples. *Click* one of them for testing.")
 #st.markdown("**Below, you find some example test queries. Click one of them:**")
@@ -370,7 +500,8 @@ with st.form(key="query_form"):
         "Your question",
         height=120,
         value=st.session_state.get("prompt_seed", ""),
-        placeholder="Ask about radio astronomy papers…"
+        #placeholder="Ask about radio astronomy papers…"
+        placeholder=DOMAIN["placeholder"]
     )
     
     top_k = st.slider("Similarity top-k", min_value=1, max_value=10, value=default_topk, step=1)
@@ -386,7 +517,13 @@ if submitted:
         st.stop()
 
     url = f"{API_BASE}/api/search"
-    payload = {"query": prompt, "similarity_top_k": int(top_k)}
+    #payload = {"query": prompt, "similarity_top_k": int(top_k)}
+    payload = {
+        "query": prompt,
+        "similarity_top_k": int(top_k),
+        "domain": DOMAIN_KEY,
+        "collections": DOMAIN["collections"],
+    }
 
     with st.spinner("Querying RAG service…"):
         try:
@@ -450,6 +587,11 @@ if submitted:
             page = meta.get("page_label") or meta.get("page")
             
             # - Extract rich bibliographic info
+            authors = meta.get("authors") or meta.get("author") or meta.get("first_author") or display_name
+            citation = _journal_citation(meta)
+            url = meta.get("url")
+            download_url = meta.get("download_url")
+            
             if doctype=="arxiv":
                 # - Extract author & citation
                 author = _first_author(meta)
@@ -489,7 +631,8 @@ if submitted:
                 download_url= meta.get("download_url")  
                 
             else:
-                print(f"WARN: Unknown doctype retrieved {doctype}, will set empty link field!")
+                #print(f"WARN: Unknown doctype retrieved {doctype}, will set empty link field!")
+                print(f"WARN: Unknown doctype retrieved {doctype}, using generic metadata formatting.")
                 
             # - Set link fields
             link_html = f"<a class='paper-link' href='{url}' target='_blank'>[LINK]</a>" if url else ""
