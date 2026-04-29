@@ -644,7 +644,19 @@ def load_args():
     parser.add_argument("-llm_url", "--llm_url", type=str, required=False, default="http://localhost:11434", help="LLM ollama url")
     parser.add_argument("-llm_ctx_window", "--llm_ctx_window", type=int, required=False, default=4096, help="LLM context window")
     parser.add_argument("-llm_timeout", "--llm_timeout", type=int, required=False, default=120, help="LLM response timeout in seconds")
-    parser.add_argument("-llm_keep_alive", "--llm_keep_alive", type=str, required=False, default="0s", help="LLM keep alive model option. 0s means loaded for all the time duration. 1h means active for 1h")
+    parser.add_argument(
+        "-llm_keep_alive",
+        "--llm_keep_alive",
+        type=str,
+        required=False,
+        default="-1m",
+        help=(
+            "Ollama keep_alive option controlling how long the model stays loaded "
+            "after a request. Examples: 0s unloads immediately after each request; "
+            "5m keeps it loaded for 5 minutes; 1h keeps it loaded for 1 hour; "
+            "a negative duration with unit, e.g. -1m, keeps it loaded indefinitely. "
+        ),
+    )
     parser.add_argument("--llm_thinking", dest="llm_thinking", action='store_true',help='Enable LLM thinking (default=False)')
     parser.set_defaults(llm_thinking=False)
     parser.add_argument("-qdrant_url", "--qdrant_url", type=str, required=False, default="http://localhost:6333", help="QDRant URL")
