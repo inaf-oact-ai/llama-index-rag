@@ -112,7 +112,7 @@ DOMAIN_CONFIG = {
         "page_icon": "☀️",
         "logo_url": os.environ.get(
             "SOLAR_RAG_LOGO_URL",
-            "https://raw.githubusercontent.com/inaf-oact-ai/llama-index-rag/main/share/solarRAG_banner_v1.png",
+            "https://raw.githubusercontent.com/inaf-oact-ai/llama-index-rag/main/share/solarRAG_banner_v2.png",
         ),
         "collections": ["solar-living-reviews", "annreviews"],
         "examples": [
