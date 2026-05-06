@@ -76,10 +76,18 @@ def _infer_collection_from_metadata(md):
         return "radiobooks"
     if kind == "annual-review":
         return "annreviews"
-    if "radioimg-arxiv-dataset" in fp or fn.endswith(".pdf"):
+    #if "radioimg-arxiv-dataset" in fp or fn.endswith(".pdf"):
+    if "radioimg-arxiv-dataset" in fp or "/radiopapers/" in fp:
         return "radiopapers"
-
-    return None
+    if "/solar-papers/" in fp:
+        return "solar-papers"
+    if "/exoplanets-papers/" in fp:
+        return "exoplanets-papers"
+    if "/solar-living-reviews/" in fp:
+        return "solar-living-reviews"
+		
+    #return None
+    return md.get("collection") or md.get("collection_name") or md.get("_collection_name")
 
 #############################
 ##    RAG CLASS

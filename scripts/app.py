@@ -800,16 +800,25 @@ if submitted:
             if doctype=="arxiv":
                 # - Extract author & citation
                 author = _first_author(meta)
-                authors = meta.get("authors")
+                #authors = meta.get("authors")
+                raw_authors = meta.get("authors") or meta.get("author") or meta.get("first_author")
+                if isinstance(raw_authors, list):
+                    authors = format_annreview_authors(raw_authors)
+                elif isinstance(raw_authors, str) and raw_authors.strip():
+                    authors = raw_authors.strip()
+                else:
+                    authors = display_name
+                
+                
                 citation = _journal_citation(meta)  # title, journal, vol(issue), pages, year
 
                 # - Retrieve arXiv URL (if any)
-                url= meta.get("arxiv_abs_url")
+                url = meta.get("arxiv_abs_url") or meta.get("url")
                 if url is None: # try to get url from arxiv_id
                     url = _arxiv_url(meta)
             
                 # - Retrieve download link (if available)
-                download_url= meta.get("arxiv_pdf_url")
+                download_url = meta.get("arxiv_pdf_url") or meta.get("download_url")
                         
             elif doctype=="book":
                 # - Extract author
@@ -838,6 +847,20 @@ if submitted:
             else:
                 #print(f"WARN: Unknown doctype retrieved {doctype}, will set empty link field!")
                 print(f"WARN: Unknown doctype retrieved {doctype}, using generic metadata formatting.")
+                
+            # - Safety check    
+            if not authors or str(authors).strip().lower() == "none":
+                authors = display_name or "Unknown source"
+                
+            if not citation:
+                citation = (
+                    meta.get("title")
+                    or meta.get("paper_title")
+                    or meta.get("document_title")
+                    or meta.get("file_name")
+                    or display_name
+                    or "Untitled document"
+            )  
                 
             # - Set link fields
             link_html = f"<a class='paper-link' href='{url}' target='_blank'>[LINK]</a>" if url else ""
