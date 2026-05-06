@@ -263,51 +263,49 @@ def resolve_requested_collections(
 
 def _extract_year_from_arxiv_like_value(value: Any) -> Optional[int]:
     """
-    Extract publication year from arXiv-like identifiers.
+    Extract year from arXiv-like identifiers.
 
-    Modern arXiv IDs have format YYMM.NNNNN, e.g.:
-        2305.12345 -> 2023
-        9912.1234  -> 1999
-
-    This also handles filenames/URLs such as:
-        2305.12345v2.pdf
-        https://arxiv.org/abs/2305.12345
+    Handles:
+    - modern IDs: 2305.12345, 0704.0001, 9912.1234
+    - old-style IDs: astro-ph/0012345, astro-ph/0601234
+    - filenames/URLs containing those IDs
     """
 
-    if value is None:
-        return None
-
-    if not isinstance(value, str):
+    if value is None or not isinstance(value, str):
         return None
 
     s = value.strip()
     if not s:
         return None
 
-    # Remove common arXiv prefix.
     s = re.sub(r"^arxiv:\s*", "", s, flags=re.IGNORECASE)
+
+    # Old-style arXiv IDs, e.g. astro-ph/0012345, astro-ph/0601234.
+    # First two digits after slash are year.
+    m_old = re.search(
+        r"(?:astro-ph|hep-ph|hep-th|gr-qc|quant-ph|cond-mat|math|cs|physics|nucl-th|nucl-ex|stat|q-bio|q-fin|nlin)/(\d{2})\d{5}",
+        s,
+        flags=re.IGNORECASE,
+    )
+    if m_old:
+        yy = int(m_old.group(1))
+        year = 1900 + yy if yy >= 90 else 2000 + yy
+        if 1991 <= year <= 2100:
+            return year
 
     # Modern arXiv IDs: YYMM.NNNN or YYMM.NNNNN, optionally with vN.
     m = re.search(r"(?<!\d)(\d{2})(\d{2})\.\d{4,5}(?:v\d+)?(?!\d)", s)
-    if not m:
-        return None
+    if m:
+        yy = int(m.group(1))
+        mm = int(m.group(2))
 
-    yy = int(m.group(1))
-    mm = int(m.group(2))
+        if not 1 <= mm <= 12:
+            return None
 
-    if not 1 <= mm <= 12:
-        return None
+        year = 1900 + yy if yy >= 90 else 2000 + yy
 
-    # arXiv modern IDs started in 2007.
-    # YY >= 90 is old/legacy-like and should map to 19YY.
-    # Otherwise map to 20YY.
-    if yy >= 90:
-        year = 1900 + yy
-    else:
-        year = 2000 + yy
-
-    if 1991 <= year <= 2100:
-        return year
+        if 1991 <= year <= 2100:
+            return year
 
     return None
 
@@ -1038,6 +1036,90 @@ def main():
                 message=str(e),
                 collections=[],
             )
+
+    #######################################
+    ##     API COLLECTION YEAR DEBUG
+    #######################################
+    @app.get("/api/collections/{collection_name}/year_debug", status_code=200)
+    def collection_year_debug(collection_name: str, limit: int = 2000):
+        """
+        Inspect inferred years for a Qdrant collection.
+
+        Returns:
+        - year histogram
+        - sample records for min/max years
+        - sample records where no year was found
+        """
+
+        try:
+            records_seen = 0
+            offset = None
+            year_counts = {}
+            no_year_samples = []
+            year_samples = {}
+
+            while records_seen < limit:
+                records, offset = summary_qdrant_client.scroll(
+                    collection_name=collection_name,
+                    limit=min(256, limit - records_seen),
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+
+                if not records:
+                    break
+
+                for rec in records:
+                    payload = rec.payload or {}
+                    md = _payload_to_metadata(payload) if "_payload_to_metadata" in globals() else payload
+
+                    year = _extract_year_from_metadata(md)
+
+                    sample = {
+                        "point_id": str(rec.id),
+                        "year": year,
+                        "file_name": md.get("file_name"),
+                        "file_path": md.get("file_path") or md.get("filepath"),
+                        "arxiv_id": md.get("arxiv_id") or md.get("arXiv") or md.get("arxiv") or md.get("eprint") or md.get("identifier"),
+                        "title": md.get("title") or md.get("paper_title") or md.get("document_title"),
+                        "date": md.get("date") or md.get("published") or md.get("publication_date") or md.get("year"),
+                        "metadata_keys": sorted(list(md.keys()))[:80],
+                    }
+
+                    if year is None:
+                        if len(no_year_samples) < 10:
+                            no_year_samples.append(sample)
+                    else:
+                        year_counts[year] = year_counts.get(year, 0) + 1
+                        year_samples.setdefault(year, sample)
+
+                records_seen += len(records)
+
+                if offset is None:
+                    break
+
+            years = sorted(year_counts.keys())
+
+            return {
+                "status": 0,
+                "collection": collection_name,
+                "records_seen": records_seen,
+                "year_counts": {str(y): year_counts[y] for y in years},
+                "year_min": min(years) if years else None,
+                "year_max": max(years) if years else None,
+                "min_year_sample": year_samples.get(min(years)) if years else None,
+                "max_year_sample": year_samples.get(max(years)) if years else None,
+                "no_year_samples": no_year_samples,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed year debug for {collection_name} (err={str(e)})!")
+            return {
+                "status": -1,
+                "collection": collection_name,
+                "message": str(e),
+            }
 
     #######################################
     ##     API SEARCH
