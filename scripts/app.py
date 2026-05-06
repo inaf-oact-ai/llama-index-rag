@@ -114,13 +114,29 @@ DOMAIN_CONFIG = {
             "SOLAR_RAG_LOGO_URL",
             "https://raw.githubusercontent.com/inaf-oact-ai/llama-index-rag/main/share/solarRAG_banner_v2.png",
         ),
-        "collections": ["solar-living-reviews", "annreviews"],
+        "collections": ["solar-living-reviews", "solar-papers", "annreviews"],
         "examples": [
             "What are the main observational signatures of solar flares?",
             "How are CMEs related to Forbush decreases?",
             "What features are commonly used for solar flare forecasting?",
         ],
         "placeholder": "Ask about solar physics papers and reviews…",
+    },
+    "exoplanets": {
+        "title": "Exoplanets RAG",
+        "subtitle": "AI-powered Retrieval-Augmented Generation for Exoplanet Science",
+        "page_icon": "🪐",
+        "logo_url": os.environ.get(
+            "EXOPLANETS_RAG_LOGO_URL",
+            "https://raw.githubusercontent.com/inaf-oact-ai/llama-index-rag/main/share/exoplanetsRAG_banner_v1.png",
+        ),
+        "collections": ["exoplanets-papers", "annreviews"],
+        "examples": [
+            "What are the main methods used to detect exoplanets?",
+            "How are exoplanet atmospheres characterized from transit spectroscopy?",
+            "What are hot Jupiters and why are they important for exoplanet science?",
+        ],
+        "placeholder": "Ask about exoplanet papers and reviews…",
     },
 }
 

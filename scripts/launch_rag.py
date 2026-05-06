@@ -87,13 +87,14 @@ collection_descriptions = {
     "radiopapers": "Scientific papers stored in ArXiV repository with subject keywords related to radio astronomy.",
     "radiobooks": "Textbooks and monographs related to radio astronomy.",
     "annreviews": "Annual Reviews articles and review papers relevant to astronomy and astrophysics.",
-    #"solar-papers": "Scientific papers stored in ArXiV repository with subject keywords related to radio astronomy.",
+    "solar-papers": "Scientific papers related to solar physics, solar activity, solar flares, CMEs, and heliophysics.",
     "solar-living-reviews": "Springer Living Reviews in Solar Physics articles",
+    "exoplanets-papers": "Scientific papers related to exoplanets, planetary systems, atmospheres, detection methods, and characterization.",
 }
 DOMAIN_COLLECTIONS = {
     "radio": ["radiopapers", "radiobooks", "annreviews"],
-    #"solar": ["solar-papers", "solar-living-reviews", "annreviews"],
-    "solar": ["solar-living-reviews", "annreviews"],
+    "solar": ["solar-papers", "solar-living-reviews", "annreviews"],
+    "exoplanets": ["exoplanets-papers", "annreviews"],
 }
 
 class RAG:
@@ -637,8 +638,19 @@ def load_args():
     parser.add_argument("-embedding_model", "--embedding_model", type=str, required=False, default="mixedbread-ai/mxbai-embed-large-v1", help="Embedder model")
     parser.add_argument("-chunk_size", "--chunk_size", type=int, required=False, default=1024, help="Chunk size")
     parser.add_argument("-collection_name", "--collection_name", type=str, required=False, default="radiopapers", help="Collection name")
-    #parser.add_argument("-collection_names", "--collection_names", type=str, required=False, default="radiopapers,radiobooks,annreviews", help="Comma-separated list of Qdrant collection names to query across (overrides --collection_name)")
     parser.add_argument("-collection_names", "--collection_names", type=str, required=False, default="radiopapers,radiobooks,annreviews,solar-living-reviews", help="Comma-separated list of Qdrant collection names to load at startup. Requests can dynamically select a subset.")
+    parser.add_argument(
+        "-collection_names",
+        "--collection_names",
+        type=str,
+        required=False,
+        default="radiopapers,radiobooks,annreviews,solar-living-reviews,solar-papers,exoplanets-papers",
+        help=(
+            "Comma-separated list of Qdrant collection names to load at startup. "
+            "Requests can dynamically select a subset. Include the union of all "
+            "collections used by the frontend domains."
+        ),
+    )
     parser.add_argument("-similarity_thr", "--similarity_thr", type=float, required=False, default=0.5, help="Similarity threshold")
     parser.add_argument("-llm", "--llm", type=str, required=False, default="", help="LLM model name")
     parser.add_argument("-llm_url", "--llm_url", type=str, required=False, default="http://localhost:11434", help="LLM ollama url")
