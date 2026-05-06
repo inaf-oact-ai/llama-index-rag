@@ -186,12 +186,22 @@ def format_collection_summary(collection_name: str, summaries: dict) -> str:
 
     item = summaries.get(collection_name)
     if not item:
-        return f"<li><code>{collection_name}</code>: summary unavailable</li>"
+        return (
+            f"<li style='margin-bottom:0.45rem;'>"
+            f"<code>{collection_name}</code><br>"
+            f"<span style='color:#94a3b8;'>summary unavailable</span>"
+            f"</li>"
+        )
 
     status = item.get("status", 0)
     if status != 0:
         msg = item.get("message", "unknown backend error")
-        return f"<li><code>{collection_name}</code>: summary error ({msg})</li>"
+        return (
+            f"<li style='margin-bottom:0.45rem;'>"
+            f"<code>{collection_name}</code><br>"
+            f"<span style='color:#b91c1c;'>summary error: {msg}</span>"
+            f"</li>"
+        )
 
     ndocs = item.get("estimated_documents", 0)
     npoints = item.get("points_count", 0)
@@ -200,15 +210,19 @@ def format_collection_summary(collection_name: str, summaries: dict) -> str:
 
     if ymin is not None and ymax is not None:
         if ymin == ymax:
-            year_text = f", year {ymin}"
+            year_text = f" · {ymin}"
         else:
-            year_text = f", years {ymin}–{ymax}"
+            year_text = f" · {ymin}–{ymax}"
     else:
         year_text = ""
 
     return (
-        f"<li><code>{collection_name}</code>: "
-        f"{ndocs:,} docs, {npoints:,} chunks{year_text}</li>"
+        f"<li style='margin-bottom:0.45rem;'>"
+        f"<code>{collection_name}</code><br>"
+        f"<span style='color:#475569;'>"
+        f"{ndocs:,} documents · {npoints:,} chunks{year_text}"
+        f"</span>"
+        f"</li>"
     )
 
 
@@ -224,6 +238,11 @@ def render_domain_landing_page(api_base: str):
     st.markdown("<br>", unsafe_allow_html=True)
     
     collection_summaries = fetch_collection_summaries(api_base)
+    
+    if collection_summaries:
+        st.caption(f"Loaded summaries for {len(collection_summaries)} collections.")
+    else:
+        st.warning("No collection summaries available. Check backend URL or server status.")
 
     cols = st.columns(len(DOMAIN_CONFIG))
 
