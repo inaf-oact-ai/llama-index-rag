@@ -203,6 +203,20 @@ class RetrieveResponse(BaseModel):
     documents: list[RetrievedDocument] = Field(default_factory=list)
     debug: dict = Field(default_factory=dict)    
 
+class CollectionSummary(BaseModel):
+    collection: str
+    points_count: int = 0
+    estimated_documents: int = 0
+    year_min: Optional[int] = None
+    year_max: Optional[int] = None
+    status: int = 0
+    message: str = "ok"
+
+class CollectionsSummaryResponse(BaseModel):
+    status: int
+    message: str = "ok"
+    collections: list[CollectionSummary] = Field(default_factory=list)
+
 
 def resolve_requested_collections(
     requested_domain: Optional[str],
@@ -244,6 +258,155 @@ def resolve_requested_collections(
         )
 
     return resolved
+
+
+def _extract_year_from_metadata(md: dict[str, Any]) -> Optional[int]:
+    """Extract a reasonable publication year from common metadata fields."""
+
+    candidates = [
+        md.get("year"),
+        md.get("pub_year"),
+        md.get("publication_year"),
+        md.get("date"),
+        md.get("published"),
+        md.get("publication_date"),
+    ]
+
+    for value in candidates:
+        if value is None:
+            continue
+
+        if isinstance(value, int):
+            if 1500 <= value <= 2100:
+                return value
+
+        if isinstance(value, float):
+            year = int(value)
+            if 1500 <= year <= 2100:
+                return year
+
+        if isinstance(value, str):
+            m = re.search(r"(15|16|17|18|19|20|21)\d{2}", value)
+            if m:
+                year = int(m.group(0))
+                if 1500 <= year <= 2100:
+                    return year
+
+    return None
+
+
+def _document_key_from_metadata(md: dict[str, Any], fallback_id: Any) -> str:
+    """
+    Estimate a unique source document key from chunk metadata.
+
+    This is used to estimate number of papers/books/reviews from Qdrant chunks.
+    """
+
+    for key in [
+        "doi",
+        "arxiv_id",
+        "bibcode",
+        "isbn",
+        "issn",
+        "source_id",
+        "document_id",
+        "doc_id",
+        "file_name",
+        "file_path",
+        "title",
+        "paper_title",
+        "document_title",
+    ]:
+        value = md.get(key)
+        if isinstance(value, str) and value.strip():
+            return f"{key}:{value.strip()}"
+
+    return f"point:{fallback_id}"
+
+
+def summarize_qdrant_collection(
+    client: qdrant_client.QdrantClient,
+    collection_name: str,
+    max_scroll_points: int = 20000,
+    page_size: int = 256,
+) -> CollectionSummary:
+    """
+    Summarize a Qdrant collection.
+
+    points_count is the Qdrant point count.
+    estimated_documents is based on unique document-like metadata keys.
+    year range is estimated from metadata year/date fields.
+    """
+
+    try:
+        info = client.get_collection(collection_name=collection_name)
+        points_count = int(info.points_count or 0)
+
+        doc_keys = set()
+        years = []
+
+        offset = None
+        scanned = 0
+
+        while scanned < max_scroll_points:
+            records, offset = client.scroll(
+                collection_name=collection_name,
+                limit=page_size,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+
+            if not records:
+                break
+
+            for rec in records:
+                payload = rec.payload or {}
+
+                # LlamaIndex/Qdrant payloads can store metadata either directly
+                # or under nested metadata-like keys depending on ingestion version.
+                md = payload.get("metadata") or payload.get("_node_content") or payload
+
+                if isinstance(md, str):
+                    # Some LlamaIndex payloads serialize node content as JSON string.
+                    # Keep this conservative to avoid hard failures.
+                    md = payload
+
+                if not isinstance(md, dict):
+                    md = payload
+
+                doc_keys.add(_document_key_from_metadata(md, rec.id))
+
+                year = _extract_year_from_metadata(md)
+                if year is not None:
+                    years.append(year)
+
+            scanned += len(records)
+
+            if offset is None:
+                break
+
+        return CollectionSummary(
+            collection=collection_name,
+            points_count=points_count,
+            estimated_documents=len(doc_keys),
+            year_min=min(years) if years else None,
+            year_max=max(years) if years else None,
+            status=0,
+            message="ok",
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to summarize collection {collection_name} (err={str(e)})!")
+        return CollectionSummary(
+            collection=collection_name,
+            points_count=0,
+            estimated_documents=0,
+            year_min=None,
+            year_max=None,
+            status=-1,
+            message=str(e),
+        )
 
 def source_to_retrieved_document(source: dict) -> RetrievedDocument:
     original_metadata = dict(source.get("metadata") or {})
@@ -750,6 +913,10 @@ def main():
         index = rag.qdrant_index()
         logger.info(f"index: {index}")
 
+    # - Create Qdrant collection summary
+    summary_qdrant_client = qdrant_client.QdrantClient(url=args.qdrant_url)
+    COLLECTION_SUMMARY_CACHE = {}
+
     # - Create web app
     logger.info("Creating web app ...")
     app = FastAPI()
@@ -761,6 +928,42 @@ def main():
 
 
     query_instr = "You can only answer based on the provided context. If a response cannot be formed strictly using the context, politely say you don't have knowledge about that topic"
+
+
+    #######################################
+    ##     API COLLECTION SUMMARIES
+    #######################################
+    @app.get("/api/collections/summary", response_model=CollectionsSummaryResponse, status_code=200)
+    def collections_summary(refresh: bool = False):
+        """Return lightweight collection summaries for the frontend landing page."""
+
+        try:
+            available_collections = list(indices.keys()) if multi_mode else [args.collection_name]
+
+            summaries = []
+
+            for cname in available_collections:
+                if refresh or cname not in COLLECTION_SUMMARY_CACHE:
+                    COLLECTION_SUMMARY_CACHE[cname] = summarize_qdrant_collection(
+                        client=summary_qdrant_client,
+                        collection_name=cname,
+                    )
+
+                summaries.append(COLLECTION_SUMMARY_CACHE[cname])
+
+            return CollectionsSummaryResponse(
+                status=0,
+                message="ok",
+                collections=summaries,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to build collection summaries (err={str(e)})!")
+            return CollectionsSummaryResponse(
+                status=-1,
+                message=str(e),
+                collections=[],
+            )
 
     #######################################
     ##     API SEARCH

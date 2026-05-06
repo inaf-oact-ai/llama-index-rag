@@ -146,7 +146,55 @@ def get_domain_config(domain_key: str) -> dict:
     return DOMAIN_CONFIG.get(domain_key, DOMAIN_CONFIG["radio"])
 
 
-def render_domain_landing_page():
+def fetch_collection_summaries(api_base: str) -> dict:
+    """Fetch collection summaries from the backend."""
+
+    try:
+        r = requests.get(f"{api_base}/api/collections/summary", timeout=30)
+        if r.status_code != 200:
+            return {}
+
+        data = r.json()
+        if data.get("status", -1) != 0:
+            return {}
+
+        return {
+            item.get("collection"): item
+            for item in data.get("collections", [])
+            if item.get("collection")
+        }
+
+    except Exception:
+        return {}
+
+
+def format_collection_summary(collection_name: str, summaries: dict) -> str:
+    """Format collection summary for the landing-page cards."""
+
+    item = summaries.get(collection_name)
+    if not item:
+        return f"<li><code>{collection_name}</code>: summary unavailable</li>"
+
+    ndocs = item.get("estimated_documents", 0)
+    npoints = item.get("points_count", 0)
+    ymin = item.get("year_min")
+    ymax = item.get("year_max")
+
+    if ymin is not None and ymax is not None:
+        if ymin == ymax:
+            year_text = f"{ymin}"
+        else:
+            year_text = f"{ymin}–{ymax}"
+    else:
+        year_text = "year range unavailable"
+
+    return (
+        f"<li><code>{collection_name}</code>: "
+        f"{ndocs:,} docs/papers, {npoints:,} chunks, {year_text}</li>"
+    )
+
+
+def render_domain_landing_page(api_base: str):
     """Render the landing page used to select the RAG domain."""
 
     st.markdown("<h1 style='text-align:center;'>Research RAG</h1>", unsafe_allow_html=True)
@@ -156,6 +204,8 @@ def render_domain_landing_page():
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
+    
+    collection_summaries = fetch_collection_summaries(api_base)
 
     cols = st.columns(len(DOMAIN_CONFIG))
 
@@ -175,9 +225,12 @@ def render_domain_landing_page():
                     <div style="font-size:48px;margin-bottom:0.5rem;">{cfg["page_icon"]}</div>
                     <h2 style="margin-bottom:0.4rem;">{cfg["title"]}</h2>
                     <p style="color:#64748b;font-size:17px;">{cfg["subtitle"]}</p>
-                    <p style="color:#475569;font-size:14px;">
-                        Collections: {", ".join(cfg["collections"])}
-                    </p>
+                    <div style="text-align:left;color:#475569;font-size:14px;margin-top:0.8rem;">
+                        <strong>Collections</strong>
+                        <ul style="margin-top:0.35rem;padding-left:1.2rem;">
+                            {"".join(format_collection_summary(c, collection_summaries) for c in cfg["collections"])}
+                        </ul>
+                    </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -192,13 +245,33 @@ def render_domain_landing_page():
 ######################################
 ##  DOMAIN SELECTION
 ######################################
+API_BASE_DEFAULT = os.environ.get("RAG_API_URL", "http://localhost:8000")
+
+#if "selected_domain" not in st.session_state:
+#    render_domain_landing_page()
+#    st.markdown(
+#        "<hr style='margin-top:3em;margin-bottom:1em;'>"
+#        "<p style='text-align:center;color:black;font-size:18px;'>"
+#        "© 2025 S. Riggi – INAF"
+#        "</p>",
+#        unsafe_allow_html=True,
+#    )
+#    st.stop()
+
+
 if "selected_domain" not in st.session_state:
-    render_domain_landing_page()
+    API_BASE = st.text_input(
+        "Backend API base URL",
+        value=API_BASE_DEFAULT,
+        help="Your FastAPI base URL, without trailing slash.",
+    )
+
+    render_domain_landing_page(API_BASE)
 
     st.markdown(
         "<hr style='margin-top:3em;margin-bottom:1em;'>"
         "<p style='text-align:center;color:black;font-size:18px;'>"
-        "© 2025 S. Riggi – INAF"
+        "© 2026 S. Riggi – INAF"
         "</p>",
         unsafe_allow_html=True,
     )
@@ -217,9 +290,14 @@ print(f"COLLECTIONS: {DOMAIN.get('collections')}")
 ##     SIDEBAR CONFIG
 ######################################
 st.sidebar.header("Backend Settings")
+#API_BASE = st.sidebar.text_input(
+#    "API base URL",
+#    value=os.environ.get("RAG_API_URL", "http://localhost:8000"),
+#    help="Your FastAPI base URL (no trailing slash)",
+#)
 API_BASE = st.sidebar.text_input(
     "API base URL",
-    value=os.environ.get("RAG_API_URL", "http://localhost:8000"),
+    value=API_BASE_DEFAULT,
     help="Your FastAPI base URL (no trailing slash)",
 )
 
