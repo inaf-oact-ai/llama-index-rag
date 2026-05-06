@@ -288,6 +288,11 @@ def render_domain_landing_page(api_base: str, show_collection_summary: bool = Fa
     if show_collection_summary:
         if collection_summaries:
             st.caption(f"Loaded summaries for {len(collection_summaries)} collections.")
+            st.caption(
+                "Note: displayed year ranges are inferred from available metadata; "
+                "for arXiv-based collections they may reflect arXiv submission year "
+                "rather than journal publication year."
+            )
         else:
             st.warning("No collection summaries available. Check backend URL or server status.")
 
