@@ -8,10 +8,45 @@
 import os
 import time
 import re
+import argparse
 
 # - Import streamlit
 import requests
 import streamlit as st
+
+######################################
+##  STREAMLIT CLI ARGS
+######################################
+
+def load_streamlit_args():
+    """Parse command-line options passed after: streamlit run app.py -- ..."""
+
+    parser = argparse.ArgumentParser(add_help=False)
+
+    parser.add_argument(
+        "--show_collection_summary",
+        dest="show_collection_summary",
+        action="store_true",
+        help="Fetch and show collection statistics on the landing page.",
+    )
+
+    parser.add_argument(
+        "--no_collection_summary",
+        dest="show_collection_summary",
+        action="store_false",
+        help="Disable collection-statistics fetching on the landing page.",
+    )
+
+    parser.set_defaults(
+        show_collection_summary=os.environ.get("RAG_SHOW_COLLECTION_SUMMARY", "0").lower()
+        in {"1", "true", "yes", "on"}
+    )
+
+    args, _ = parser.parse_known_args()
+    return args
+
+
+APP_ARGS = load_streamlit_args()
 
 ######################################
 ##  PAGE CONFIG & LIGHT THEMING
@@ -146,39 +181,46 @@ def get_domain_config(domain_key: str) -> dict:
     return DOMAIN_CONFIG.get(domain_key, DOMAIN_CONFIG["radio"])
 
 
-def fetch_collection_summaries(api_base: str) -> dict:
+def fetch_collection_summaries(api_base: str, enabled: bool = True) -> dict:
     """Fetch collection summaries from the backend."""
+
+    if not enabled:
+        return {}
 
     url = f"{api_base.rstrip('/')}/api/collections/summary"
 
-    try:
-        r = requests.get(url, timeout=60)
+    with st.spinner("Loading collection information from the RAG backend..."):
+        try:
+            r = requests.get(url, timeout=60)
 
-        if r.status_code != 200:
-            st.warning(f"Could not fetch collection summaries from {url}: HTTP {r.status_code}")
-            st.caption(r.text[:500])
+            if r.status_code != 200:
+                st.warning(f"Could not fetch collection summaries from {url}: HTTP {r.status_code}")
+                st.caption(r.text[:500])
+                return {}
+
+            data = r.json()
+
+            if data.get("status", -1) != 0:
+                st.warning(
+                    f"Backend returned collection-summary status={data.get('status')}: "
+                    f"{data.get('message')}"
+                )
+                return {}
+
+            summaries = {
+                item.get("collection"): item
+                for item in data.get("collections", [])
+                if item.get("collection")
+            }
+
+            if not summaries:
+                st.warning(f"Collection summary endpoint returned no collections: {url}")
+
+            return summaries
+
+        except Exception as e:
+            st.warning(f"Could not fetch collection summaries from {url}: {e}")
             return {}
-
-        data = r.json()
-
-        if data.get("status", -1) != 0:
-            st.warning(f"Backend returned collection-summary status={data.get('status')}: {data.get('message')}")
-            return {}
-
-        summaries = {
-            item.get("collection"): item
-            for item in data.get("collections", [])
-            if item.get("collection")
-        }
-
-        if not summaries:
-            st.warning(f"Collection summary endpoint returned no collections: {url}")
-
-        return summaries
-
-    except Exception as e:
-        st.warning(f"Could not fetch collection summaries from {url}: {e}")
-        return {}
 
 
 def format_collection_summary(collection_name: str, summaries: dict) -> str:
@@ -226,7 +268,7 @@ def format_collection_summary(collection_name: str, summaries: dict) -> str:
     )
 
 
-def render_domain_landing_page(api_base: str):
+def render_domain_landing_page(api_base: str, show_collection_summary: bool = False):
     """Render the landing page used to select the RAG domain."""
 
     st.markdown("<h1 style='text-align:center;'>Research RAG</h1>", unsafe_allow_html=True)
@@ -237,7 +279,10 @@ def render_domain_landing_page(api_base: str):
 
     st.markdown("<br>", unsafe_allow_html=True)
     
-    collection_summaries = fetch_collection_summaries(api_base)
+    collection_summaries = fetch_collection_summaries(
+        api_base=api_base,
+        enabled=show_collection_summary,
+    )
     
     if collection_summaries:
         st.caption(f"Loaded summaries for {len(collection_summaries)} collections.")
@@ -248,6 +293,22 @@ def render_domain_landing_page(api_base: str):
 
     for col, (domain_key, cfg) in zip(cols, DOMAIN_CONFIG.items()):
         with col:
+            if show_collection_summary:
+                collections_html = f"""
+                    <div style="text-align:left;color:#475569;font-size:14px;margin-top:0.8rem;">
+                        <strong>Collections</strong>
+                        <ul style="margin-top:0.35rem;padding-left:1.2rem;">
+                            {"".join(format_collection_summary(c, collection_summaries) for c in cfg["collections"])}
+                        </ul>
+                    </div>
+                """
+            else:
+                collections_html = f"""
+                    <p style="color:#475569;font-size:14px;margin-top:0.8rem;">
+                        Collections: {", ".join(cfg["collections"])}
+                    </p>
+                """
+        
             st.markdown(
                 f"""
                 <div style="
@@ -262,12 +323,7 @@ def render_domain_landing_page(api_base: str):
                     <div style="font-size:48px;margin-bottom:0.5rem;">{cfg["page_icon"]}</div>
                     <h2 style="margin-bottom:0.4rem;">{cfg["title"]}</h2>
                     <p style="color:#64748b;font-size:17px;">{cfg["subtitle"]}</p>
-                    <div style="text-align:left;color:#475569;font-size:14px;margin-top:0.8rem;">
-                        <strong>Collections</strong>
-                        <ul style="margin-top:0.35rem;padding-left:1.2rem;">
-                            {"".join(format_collection_summary(c, collection_summaries) for c in cfg["collections"])}
-                        </ul>
-                    </div>
+                    {collections_html}
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -297,13 +353,19 @@ API_BASE_DEFAULT = os.environ.get("RAG_API_URL", "http://localhost:8000")
 
 
 if "selected_domain" not in st.session_state:
-    API_BASE = st.text_input(
-        "Backend API base URL",
-        value=API_BASE_DEFAULT,
-        help="Your FastAPI base URL, without trailing slash.",
-    )
+    if APP_ARGS.show_collection_summary:
+        API_BASE = st.text_input(
+            "Backend API base URL",
+            value=API_BASE_DEFAULT,
+            help="Your FastAPI base URL, without trailing slash.",
+        )
+    else:
+        API_BASE = API_BASE_DEFAULT
 
-    render_domain_landing_page(API_BASE)
+    render_domain_landing_page(
+        api_base=API_BASE,
+        show_collection_summary=APP_ARGS.show_collection_summary,
+    )
 
     st.markdown(
         "<hr style='margin-top:3em;margin-bottom:1em;'>"
