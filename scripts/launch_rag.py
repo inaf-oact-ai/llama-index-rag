@@ -280,6 +280,7 @@ def _extract_year_from_arxiv_like_value(value: Any) -> Optional[int]:
 
     s = re.sub(r"^arxiv:\s*", "", s, flags=re.IGNORECASE)
 
+
     # Old-style arXiv IDs, e.g. astro-ph/0012345, astro-ph/0601234.
     # First two digits after slash are year.
     m_old = re.search(
@@ -289,6 +290,19 @@ def _extract_year_from_arxiv_like_value(value: Any) -> Optional[int]:
     )
     if m_old:
         yy = int(m_old.group(1))
+        year = 1900 + yy if yy >= 90 else 2000 + yy
+        if 1991 <= year <= 2100:
+            return year
+
+    # Old numeric arXiv-like filenames/IDs, e.g. 0505148v1.pdf, 0210040v1.pdf.
+    # These are common for old arXiv papers when the category prefix was stripped.
+    m_old_numeric = re.search(
+        r"(?<!\d)(\d{2})\d{5}(?:v\d+)?(?:\.pdf)?(?!\d)",
+        s,
+        flags=re.IGNORECASE,
+    )
+    if m_old_numeric:
+        yy = int(m_old_numeric.group(1))
         year = 1900 + yy if yy >= 90 else 2000 + yy
         if 1991 <= year <= 2100:
             return year
