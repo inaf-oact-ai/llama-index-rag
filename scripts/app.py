@@ -286,10 +286,10 @@ def render_domain_landing_page(api_base: str, show_collection_summary: bool = Fa
     )
     
     if show_collection_summary:
-	      if collection_summaries:
-		        st.caption(f"Loaded summaries for {len(collection_summaries)} collections.")
-	  else:
-		    st.warning("No collection summaries available. Check backend URL or server status.")
+        if collection_summaries:
+            st.caption(f"Loaded summaries for {len(collection_summaries)} collections.")
+    else:
+        st.warning("No collection summaries available. Check backend URL or server status.")
 
     cols = st.columns(len(DOMAIN_CONFIG))
 
@@ -315,9 +315,9 @@ def render_domain_landing_page(api_base: str, show_collection_summary: bool = Fa
                     f"Collections: {collections_text}"
                     "</p>"
                 )
-	      
-	      
-	          card_html = (
+      
+    
+            card_html = (
                 "<div style=\""
                 "border:1px solid #e5e7eb;"
                 "border-radius:18px;"
@@ -333,7 +333,7 @@ def render_domain_landing_page(api_base: str, show_collection_summary: bool = Fa
                 f"{collections_html}"
                 "</div>"
             )
-	      
+  
             st.markdown(card_html, unsafe_allow_html=True)
 
             if st.button(f"Open {cfg['title']}", key=f"open_domain_{domain_key}", use_container_width=True):
