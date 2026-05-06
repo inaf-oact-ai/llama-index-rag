@@ -149,22 +149,35 @@ def get_domain_config(domain_key: str) -> dict:
 def fetch_collection_summaries(api_base: str) -> dict:
     """Fetch collection summaries from the backend."""
 
+    url = f"{api_base.rstrip('/')}/api/collections/summary"
+
     try:
-        r = requests.get(f"{api_base}/api/collections/summary", timeout=30)
+        r = requests.get(url, timeout=60)
+
         if r.status_code != 200:
+            st.warning(f"Could not fetch collection summaries from {url}: HTTP {r.status_code}")
+            st.caption(r.text[:500])
             return {}
 
         data = r.json()
+
         if data.get("status", -1) != 0:
+            st.warning(f"Backend returned collection-summary status={data.get('status')}: {data.get('message')}")
             return {}
 
-        return {
+        summaries = {
             item.get("collection"): item
             for item in data.get("collections", [])
             if item.get("collection")
         }
 
-    except Exception:
+        if not summaries:
+            st.warning(f"Collection summary endpoint returned no collections: {url}")
+
+        return summaries
+
+    except Exception as e:
+        st.warning(f"Could not fetch collection summaries from {url}: {e}")
         return {}
 
 
@@ -175,6 +188,11 @@ def format_collection_summary(collection_name: str, summaries: dict) -> str:
     if not item:
         return f"<li><code>{collection_name}</code>: summary unavailable</li>"
 
+    status = item.get("status", 0)
+    if status != 0:
+        msg = item.get("message", "unknown backend error")
+        return f"<li><code>{collection_name}</code>: summary error ({msg})</li>"
+
     ndocs = item.get("estimated_documents", 0)
     npoints = item.get("points_count", 0)
     ymin = item.get("year_min")
@@ -182,15 +200,15 @@ def format_collection_summary(collection_name: str, summaries: dict) -> str:
 
     if ymin is not None and ymax is not None:
         if ymin == ymax:
-            year_text = f"{ymin}"
+            year_text = f", year {ymin}"
         else:
-            year_text = f"{ymin}–{ymax}"
+            year_text = f", years {ymin}–{ymax}"
     else:
-        year_text = "year range unavailable"
+        year_text = ""
 
     return (
         f"<li><code>{collection_name}</code>: "
-        f"{ndocs:,} docs/papers, {npoints:,} chunks, {year_text}</li>"
+        f"{ndocs:,} docs, {npoints:,} chunks{year_text}</li>"
     )
 
 
@@ -220,7 +238,7 @@ def render_domain_landing_page(api_base: str):
                     text-align:center;
                     background:#ffffff;
                     box-shadow:0 4px 14px rgba(15,23,42,0.08);
-                    min-height:320px;
+                    min-height:430px;
                 ">
                     <div style="font-size:48px;margin-bottom:0.5rem;">{cfg["page_icon"]}</div>
                     <h2 style="margin-bottom:0.4rem;">{cfg["title"]}</h2>
