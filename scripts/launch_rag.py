@@ -261,9 +261,61 @@ def resolve_requested_collections(
     return resolved
 
 
+def _extract_year_from_arxiv_like_value(value: Any) -> Optional[int]:
+    """
+    Extract publication year from arXiv-like identifiers.
+
+    Modern arXiv IDs have format YYMM.NNNNN, e.g.:
+        2305.12345 -> 2023
+        9912.1234  -> 1999
+
+    This also handles filenames/URLs such as:
+        2305.12345v2.pdf
+        https://arxiv.org/abs/2305.12345
+    """
+
+    if value is None:
+        return None
+
+    if not isinstance(value, str):
+        return None
+
+    s = value.strip()
+    if not s:
+        return None
+
+    # Remove common arXiv prefix.
+    s = re.sub(r"^arxiv:\s*", "", s, flags=re.IGNORECASE)
+
+    # Modern arXiv IDs: YYMM.NNNN or YYMM.NNNNN, optionally with vN.
+    m = re.search(r"(?<!\d)(\d{2})(\d{2})\.\d{4,5}(?:v\d+)?(?!\d)", s)
+    if not m:
+        return None
+
+    yy = int(m.group(1))
+    mm = int(m.group(2))
+
+    if not 1 <= mm <= 12:
+        return None
+
+    # arXiv modern IDs started in 2007.
+    # YY >= 90 is old/legacy-like and should map to 19YY.
+    # Otherwise map to 20YY.
+    if yy >= 90:
+        year = 1900 + yy
+    else:
+        year = 2000 + yy
+
+    if 1991 <= year <= 2100:
+        return year
+
+    return None
+
+
 def _extract_year_from_metadata(md: dict[str, Any]) -> Optional[int]:
     """Extract a reasonable publication year from common metadata fields."""
 
+    # 1. Explicit year/date-like metadata fields.
     candidates = [
         md.get("year"),
         md.get("pub_year"),
@@ -271,6 +323,8 @@ def _extract_year_from_metadata(md: dict[str, Any]) -> Optional[int]:
         md.get("date"),
         md.get("published"),
         md.get("publication_date"),
+        md.get("created"),
+        md.get("updated"),
     ]
 
     for value in candidates:
@@ -292,6 +346,25 @@ def _extract_year_from_metadata(md: dict[str, Any]) -> Optional[int]:
                 year = int(m.group(0))
                 if 1500 <= year <= 2100:
                     return year
+
+    # 2. arXiv-like metadata fields and filenames.
+    arxiv_candidates = [
+        md.get("arxiv_id"),
+        md.get("arXiv"),
+        md.get("arxiv"),
+        md.get("eprint"),
+        md.get("identifier"),
+        md.get("file_name"),
+        md.get("file_path"),
+        md.get("url"),
+        md.get("arxiv_abs_url"),
+        md.get("arxiv_pdf_url"),
+    ]
+
+    for value in arxiv_candidates:
+        year = _extract_year_from_arxiv_like_value(value)
+        if year is not None:
+            return year
 
     return None
 
