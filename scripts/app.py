@@ -99,7 +99,7 @@ st.markdown(
   .banner-wrap { display:flex; justify-content:center; }
   .banner-wrap img { width:100%; max-width: 700px; height:auto; }
   .app-subtitle { text-align:center; color:gray; font-size:22px; margin-top:4px; }
-  \* .app-subtitle { text-align:center; color:gray; font-size:19px; margin-top:4px; } */
+  /* .app-subtitle { text-align:center; color:gray; font-size:19px; margin-top:4px; } */
  
 </style>
     """,
@@ -288,8 +288,8 @@ def render_domain_landing_page(api_base: str, show_collection_summary: bool = Fa
     if show_collection_summary:
         if collection_summaries:
             st.caption(f"Loaded summaries for {len(collection_summaries)} collections.")
-    else:
-        st.warning("No collection summaries available. Check backend URL or server status.")
+        else:
+            st.warning("No collection summaries available. Check backend URL or server status.")
 
     cols = st.columns(len(DOMAIN_CONFIG))
 
