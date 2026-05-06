@@ -676,6 +676,26 @@ def format_annreview_authors(authors: list[str]) -> str:
 
     return authors_formatted
 
+def format_authors_for_display(raw_authors, fallback: str = "Unknown source") -> str:
+    """Format author metadata safely for display."""
+
+    if raw_authors is None:
+        return fallback
+
+    if isinstance(raw_authors, list):
+        cleaned = [str(a).strip() for a in raw_authors if str(a).strip()]
+        if not cleaned:
+            return fallback
+        return format_annreview_authors(cleaned)
+
+    if isinstance(raw_authors, str):
+        s = raw_authors.strip()
+        if not s or s.lower() == "none":
+            return fallback
+        return s
+
+    return fallback
+
 ######################################
 ##     APP BODY
 ######################################
@@ -792,7 +812,11 @@ if submitted:
             page = meta.get("page_label") or meta.get("page")
             
             # - Extract rich bibliographic info
-            authors = meta.get("authors") or meta.get("author") or meta.get("first_author") or display_name
+            #authors = meta.get("authors") or meta.get("author") or meta.get("first_author") or display_name
+            authors = format_authors_for_display(
+                meta.get("authors") or meta.get("author") or meta.get("first_author"),
+                fallback=display_name or "Unknown source",
+            )
             citation = _journal_citation(meta)
             url = meta.get("url")
             download_url = meta.get("download_url")
@@ -801,14 +825,17 @@ if submitted:
                 # - Extract author & citation
                 author = _first_author(meta)
                 #authors = meta.get("authors")
-                raw_authors = meta.get("authors") or meta.get("author") or meta.get("first_author")
-                if isinstance(raw_authors, list):
-                    authors = format_annreview_authors(raw_authors)
-                elif isinstance(raw_authors, str) and raw_authors.strip():
-                    authors = raw_authors.strip()
-                else:
-                    authors = display_name
-                
+                authors = format_authors_for_display(
+                    meta.get("authors") or meta.get("author") or meta.get("first_author"),
+                    fallback=display_name or "Unknown source",
+                )
+                #raw_authors = meta.get("authors") or meta.get("author") or meta.get("first_author")
+                #if isinstance(raw_authors, list):
+                #    authors = format_annreview_authors(raw_authors)
+                #elif isinstance(raw_authors, str) and raw_authors.strip():
+                #    authors = raw_authors.strip()
+                #else:
+                #    authors = display_name
                 
                 citation = _journal_citation(meta)  # title, journal, vol(issue), pages, year
 
@@ -823,7 +850,11 @@ if submitted:
             elif doctype=="book":
                 # - Extract author
                 author = meta.get("first_author")
-                authors= format_book_authors(meta.get("authors")) 
+                #authors= format_book_authors(meta.get("authors"))
+                authors = format_authors_for_display(
+                    meta.get("authors") or meta.get("author") or meta.get("first_author"),
+                    fallback=display_name or "Unknown source",
+                )
                 citation = _book_citation(meta)
                 
                 # - Retrieve book URL
@@ -832,10 +863,15 @@ if submitted:
                 # - Retrieve download link (if available)
                 download_url= meta.get("download_url")
                 
-            elif doctype=="annual-review":
+            #elif doctype=="annual-review":
+            elif doctype in {"annual-review", "living-review", "solar-living-review"}:
                 # - Extract author & citation
                 author = meta.get("first_author")
-                authors = format_annreview_authors(meta.get("authors"))
+                #authors = format_annreview_authors(meta.get("authors"))
+                authors = format_authors_for_display(
+                    meta.get("authors") or meta.get("author") or meta.get("first_author"),
+                    fallback=display_name or "Unknown source",
+                )
                 citation = _journal_citation(meta)  # title, journal, vol(issue), pages, year
 
                 # - Retrieve URL
