@@ -8,7 +8,7 @@
 import os
 import sys
 import argparse
-from typing import Optional
+from typing import Optional, Any
 import structlog
 
 # - Pydantic
