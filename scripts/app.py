@@ -223,6 +223,7 @@ def fetch_collection_summaries(api_base: str, enabled: bool = True) -> dict:
             return {}
 
 
+
 def format_collection_summary(collection_name: str, summaries: dict) -> str:
     """Format collection summary for the landing-page cards."""
 
@@ -284,50 +285,56 @@ def render_domain_landing_page(api_base: str, show_collection_summary: bool = Fa
         enabled=show_collection_summary,
     )
     
-    if collection_summaries:
-        st.caption(f"Loaded summaries for {len(collection_summaries)} collections.")
-    else:
-        st.warning("No collection summaries available. Check backend URL or server status.")
+    if show_collection_summary:
+	      if collection_summaries:
+		        st.caption(f"Loaded summaries for {len(collection_summaries)} collections.")
+	  else:
+		    st.warning("No collection summaries available. Check backend URL or server status.")
 
     cols = st.columns(len(DOMAIN_CONFIG))
 
     for col, (domain_key, cfg) in zip(cols, DOMAIN_CONFIG.items()):
         with col:
             if show_collection_summary:
-                collections_html = f"""
-                    <div style="text-align:left;color:#475569;font-size:14px;margin-top:0.8rem;">
-                        <strong>Collections</strong>
-                        <ul style="margin-top:0.35rem;padding-left:1.2rem;">
-                            {"".join(format_collection_summary(c, collection_summaries) for c in cfg["collections"])}
-                        </ul>
-                    </div>
-                """
+                collection_items = "".join(
+                    format_collection_summary(c, collection_summaries)
+                    for c in cfg["collections"]
+                )
+                collections_html = (
+                    "<div style=\"text-align:left;color:#475569;font-size:14px;margin-top:0.8rem;\">"
+                    "<strong>Collections</strong>"
+                    "<ul style=\"margin-top:0.35rem;padding-left:1.2rem;\">"
+                    f"{collection_items}"
+                    "</ul>"
+                    "</div>"
+                )
             else:
-                collections_html = f"""
-                    <p style="color:#475569;font-size:14px;margin-top:0.8rem;">
-                        Collections: {", ".join(cfg["collections"])}
-                    </p>
-                """
-        
-            st.markdown(
-                f"""
-                <div style="
-                    border:1px solid #e5e7eb;
-                    border-radius:18px;
-                    padding:1.25rem;
-                    text-align:center;
-                    background:#ffffff;
-                    box-shadow:0 4px 14px rgba(15,23,42,0.08);
-                    min-height:430px;
-                ">
-                    <div style="font-size:48px;margin-bottom:0.5rem;">{cfg["page_icon"]}</div>
-                    <h2 style="margin-bottom:0.4rem;">{cfg["title"]}</h2>
-                    <p style="color:#64748b;font-size:17px;">{cfg["subtitle"]}</p>
-                    {collections_html}
-                </div>
-                """,
-                unsafe_allow_html=True,
+                collections_text = ", ".join(cfg["collections"])
+                collections_html = (
+                    "<p style=\"color:#475569;font-size:14px;margin-top:0.8rem;\">"
+                    f"Collections: {collections_text}"
+                    "</p>"
+                )
+	      
+	      
+	          card_html = (
+                "<div style=\""
+                "border:1px solid #e5e7eb;"
+                "border-radius:18px;"
+                "padding:1.25rem;"
+                "text-align:center;"
+                "background:#ffffff;"
+                "box-shadow:0 4px 14px rgba(15,23,42,0.08);"
+                "min-height:430px;"
+                "\">"
+                f"<div style=\"font-size:48px;margin-bottom:0.5rem;\">{cfg['page_icon']}</div>"
+                f"<h2 style=\"margin-bottom:0.4rem;\">{cfg['title']}</h2>"
+                f"<p style=\"color:#64748b;font-size:17px;\">{cfg['subtitle']}</p>"
+                f"{collections_html}"
+                "</div>"
             )
+	      
+            st.markdown(card_html, unsafe_allow_html=True)
 
             if st.button(f"Open {cfg['title']}", key=f"open_domain_{domain_key}", use_container_width=True):
                 st.session_state["selected_domain"] = domain_key
