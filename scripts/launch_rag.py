@@ -638,7 +638,6 @@ def load_args():
     parser.add_argument("-embedding_model", "--embedding_model", type=str, required=False, default="mixedbread-ai/mxbai-embed-large-v1", help="Embedder model")
     parser.add_argument("-chunk_size", "--chunk_size", type=int, required=False, default=1024, help="Chunk size")
     parser.add_argument("-collection_name", "--collection_name", type=str, required=False, default="radiopapers", help="Collection name")
-    parser.add_argument("-collection_names", "--collection_names", type=str, required=False, default="radiopapers,radiobooks,annreviews,solar-living-reviews", help="Comma-separated list of Qdrant collection names to load at startup. Requests can dynamically select a subset.")
     parser.add_argument(
         "-collection_names",
         "--collection_names",
