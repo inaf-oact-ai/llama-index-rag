@@ -10,6 +10,7 @@ import sys
 import argparse
 from typing import Optional, Any
 import structlog
+import re
 
 # - Pydantic
 from pydantic import BaseModel, Field
