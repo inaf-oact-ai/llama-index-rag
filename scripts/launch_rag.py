@@ -558,6 +558,12 @@ def source_from_node(sn):
             source = get_book_metadata(sn, md)
         elif doctype == "annual-review": # Annual Review
             source = get_annreview_metadata(sn, md)
+        elif doctype in {
+            "living-review-solar-physics",
+		        "solar-living-review",
+		        "living-review",
+	      }:
+		        source = get_solar_living_review_metadata(sn, md)    
         else: # - Arxiv paper
             logger.warning(f"Unknown doctype parsed ({doctype}), treating as generic/arxiv-like entry ...")
             source = get_arxiv_metadata(sn, md)
@@ -731,7 +737,39 @@ def get_annreview_metadata(sn, md):
     
     return source
 
+def get_solar_living_review_metadata(sn, md):
+    """Get Springer Living Reviews in Solar Physics metadata."""
 
+    source = {
+        "doctype": "solar-living-review",
+        "node_id": sn.node.node_id,
+        "score": sn.score,
+        "file_path": _metadata_file_path(md),
+        "file_name": md.get("file_name") or md.get("pdf_filename"),
+        "page_label": md.get("page_label"),
+        "title": md.get("title"),
+        "authors": md.get("authors"),
+        "first_author": md.get("first_author"),
+        "journal": md.get("journal") or md.get("source_name"),
+        "journal_short": md.get("journal_short"),
+        "publisher": md.get("publisher"),
+        "volume": md.get("volume"),
+        "issue": md.get("issue"),
+        "article_number": md.get("article_number"),
+        "year": md.get("year"),
+        "published_date": md.get("published_date"),
+        "doi": md.get("doi"),
+        "url": md.get("url"),
+        "pdf_url": md.get("pdf_url"),
+        "html_url": md.get("html_url"),
+        "download_url": md.get("download_url") or md.get("pdf_url"),
+        "source_id": md.get("source_id"),
+        "source_family": md.get("source_family"),
+        "source_type": md.get("source_type"),
+        "text": _node_text(sn),
+    }
+
+    return source
 
 def build_fusion_retriever(
     indices: dict,
