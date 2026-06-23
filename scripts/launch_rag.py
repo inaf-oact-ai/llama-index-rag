@@ -28,6 +28,11 @@ from llama_index.core.selectors.embedding_selectors import EmbeddingSingleSelect
 from llama_index.core.retrievers import QueryFusionRetriever
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core import PromptTemplate
+from llama_index.core.schema import NodeWithScore
+try:
+    from llama_index.core.postprocessor.types import BaseNodePostprocessor
+except:
+    from llama_index.core.postprocessor import BaseNodePostprocessor
 
 # - Import FastAPI
 import uvicorn
@@ -177,7 +182,13 @@ class RAG:
 
 class Query(BaseModel):
     query: str
-    similarity_top_k: Optional[int] = Field(default=1, ge=1, le=10)
+    
+    # - Final number of chunks used for synthesis
+    similarity_top_k: Optional[int] = Field(default=5, ge=1, le=50)
+    
+    # - Number of chunks initially retrieved before final truncation/reranking
+    retrieval_top_k: Optional[int] = Field(default=None, ge=1, le=200)
+    
     domain: Optional[str] = None
     collections: Optional[list[str]] = None
     similarity_thr: Optional[float] = None
@@ -192,7 +203,13 @@ class Response(BaseModel):
     
 class RetrieveRequest(BaseModel):
     query: str
+    
+    # - Final number of chunks returned to the calle
     similarity_top_k: Optional[int] = Field(default=8, ge=1, le=100)
+    
+    # - Number of chunks initially retrieved before final truncation/reranking.
+    retrieval_top_k: Optional[int] = Field(default=None, ge=1, le=500)
+    
     collections: Optional[list[str]] = None
     similarity_thr: Optional[float] = None
     num_queries: Optional[int] = None
@@ -227,6 +244,20 @@ class CollectionsSummaryResponse(BaseModel):
     status: int
     message: str = "ok"
     collections: list[CollectionSummary] = Field(default_factory=list)
+
+
+class TopKPostprocessor(BaseNodePostprocessor):
+    """Keep only the first top-k nodes after retrieval/filtering/reranking."""
+
+    top_k: int = 5
+
+    def _postprocess_nodes(
+        self,
+        nodes: list[NodeWithScore],
+        query_bundle=None,
+        query_str: Optional[str] = None,
+    ):
+        return nodes[: self.top_k]
 
 
 def resolve_requested_collections(
@@ -832,45 +863,48 @@ def build_refine_template():
     )
 
 
-def build_query_engine_old(
-    index=None,
-    indices: dict | None = None,
-    multi_mode: bool = False,
-    similarity_top_k: int = 5,
-    similarity_thr: float = 0.5,
-    num_queries: int = 1,
+
+def resolve_top_k(
+    final_top_k: Optional[int],
+    retrieval_top_k: Optional[int],
+    default_final_top_k: int,
+    default_retrieval_top_k: int,
+    max_final_top_k: int,
+    max_retrieval_top_k: int,
 ):
-    """ Build query engine """
-    if not multi_mode:
-        return index.as_query_engine(
-            similarity_top_k=similarity_top_k,
-            output=Response,
-            response_mode="tree_summarize",
-            include_metadata=True,
-            node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=similarity_thr)],
-            verbose=True,
-        )
+    """
+    Resolve final and retrieval top-k values.
 
-    fusion = build_fusion_retriever(
-        indices=indices,
-        similarity_top_k=similarity_top_k,
-        num_queries=num_queries,
-    )
+    final_top_k controls how many chunks are finally used/returned.
+    retrieval_top_k controls how many candidate chunks are initially retrieved.
+    """
 
-    return RetrieverQueryEngine.from_args(
-        fusion,
-        response_mode="tree_summarize",
-        include_metadata=True,
-        output=Response,
-        node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=similarity_thr)],
-    )
+    resolved_final_top_k = final_top_k or default_final_top_k
+    resolved_retrieval_top_k = retrieval_top_k or default_retrieval_top_k
+
+    resolved_final_top_k = max(1, min(resolved_final_top_k, max_final_top_k))
+    resolved_retrieval_top_k = max(1, min(resolved_retrieval_top_k, max_retrieval_top_k))
+
+    # Retrieval candidate pool should never be smaller than final top-k.
+    resolved_retrieval_top_k = max(resolved_retrieval_top_k, resolved_final_top_k)
+
+    return resolved_final_top_k, resolved_retrieval_top_k
+
+
+def truncate_nodes(nodes, top_k: Optional[int]):
+    """Keep only the first top_k nodes."""
+    if top_k is None:
+        return nodes
+    return list(nodes or [])[:top_k]
 
 
 def build_query_engine(
     index=None,
     indices: dict | None = None,
     multi_mode: bool = False,
-    similarity_top_k: int = 5,
+    #similarity_top_k: int = 5,
+    retrieval_top_k: int = 30,
+    final_top_k: int = 5,
     similarity_thr: float = 0.5,
     num_queries: int = 1,
     response_mode: str = "compact",
@@ -879,22 +913,31 @@ def build_query_engine(
 
     text_qa_template = build_text_qa_template()
     refine_template = build_refine_template()
+    #node_postprocessors=[
+    #    SimilarityPostprocessor(similarity_cutoff=similarity_thr)
+    #]
+    node_postprocessors = [
+        SimilarityPostprocessor(similarity_cutoff=similarity_thr),
+        TopKPostprocessor(top_k=final_top_k),
+    ]
 
     if not multi_mode:
         return index.as_query_engine(
-            similarity_top_k=similarity_top_k,
+            #similarity_top_k=similarity_top_k,
+            similarity_top_k=retrieval_top_k,
             output=Response,
             response_mode=response_mode,
             include_metadata=True,
             text_qa_template=text_qa_template,
             refine_template=refine_template,
-            node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=similarity_thr)],
+            node_postprocessors=node_postprocessors,
             verbose=True,
         )
 
     fusion = build_fusion_retriever(
         indices=indices,
-        similarity_top_k=similarity_top_k,
+        #similarity_top_k=similarity_top_k,
+        similarity_top_k=retrieval_top_k,
         num_queries=num_queries,
     )
 
@@ -905,7 +948,7 @@ def build_query_engine(
         output=Response,
         text_qa_template=text_qa_template,
         refine_template=refine_template,
-        node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=similarity_thr)],
+        node_postprocessors=node_postprocessors,
     )
 
 
@@ -914,17 +957,21 @@ def retrieve_source_nodes(
     index=None,
     indices: dict | None = None,
     multi_mode: bool = False,
-    similarity_top_k: int = 8,
+    #similarity_top_k: int = 8,
+    retrieval_top_k: int = 30,
+    final_top_k: int = 8,
     similarity_thr: float = 0.5,
     num_queries: int = 1,
 ):
     """ Retrieve source node """
     if not multi_mode:
-        retriever = index.as_retriever(similarity_top_k=similarity_top_k)
+        ##retriever = index.as_retriever(similarity_top_k=similarity_top_k)
+        retriever = index.as_retriever(similarity_top_k=retrieval_top_k)
     else:
         retriever = build_fusion_retriever(
             indices=indices,
-            similarity_top_k=similarity_top_k,
+            #similarity_top_k=similarity_top_k,
+            similarity_top_k=retrieval_top_k,
             num_queries=num_queries,
         )
 
@@ -935,6 +982,8 @@ def retrieve_source_nodes(
             sn for sn in nodes
             if sn.score is None or sn.score >= similarity_thr
         ]
+        
+    nodes = truncate_nodes(nodes, final_top_k)        
 
     return nodes
 
@@ -1065,6 +1114,17 @@ def load_args():
     parser.add_argument("--retrieval_only_no_llm", dest="retrieval_only_no_llm", action="store_true", help="Start retrieval service without requiring an LLM. /api/retrieve works; /api/search may be disabled.")
     parser.set_defaults(retrieval_only_no_llm=False)
     parser.add_argument("--max_retrieve_top_k", type=int, default=100, help="Maximum top-k accepted by /api/retrieve.") 
+    parser.add_argument(
+        "--retrieval_top_k",
+        type=int,
+        default=30,
+        help=(
+            "Number of chunks initially retrieved before final truncation or reranking. "
+            "Use a larger value than similarity_top_k, e.g. 30."
+        ),
+    )
+    parser.add_argument("--max_search_retrieval_top_k", type=int, default=100, help="Maximum retrieval_top_k accepted by /api/search.")
+    parser.add_argument("--max_retrieve_retrieval_top_k", type=int, default=500, help="Maximum retrieval_top_k accepted by /api/retrieve.")
 
     parser.add_argument(
         "--response_mode",
@@ -1355,15 +1415,27 @@ def main():
             active_multi_mode = len(active_indices) > 1
             active_index = None if active_multi_mode else next(iter(active_indices.values()))
 
-        # - Build query engine   
-        try:
-            response_mode = query.response_mode or args.response_mode
+        # - Build query engine
+        response_mode = query.response_mode or args.response_mode
         
+        final_top_k, retrieval_top_k = resolve_top_k(
+            final_top_k=query.similarity_top_k,
+            retrieval_top_k=query.retrieval_top_k,
+            default_final_top_k=5,
+            default_retrieval_top_k=args.retrieval_top_k,
+            max_final_top_k=50,
+            max_retrieval_top_k=args.max_search_retrieval_top_k,
+        )
+        logger.info(f"Building query engine with: response_mode={response_mode}, final_top_k={final_top_k}, retrieval_top_k={retrieval_top_k}")
+        
+        try:    
             query_engine = build_query_engine(
                 index=active_index if not active_multi_mode else None,
                 indices=active_indices if active_multi_mode else None,
                 multi_mode=active_multi_mode,
-                similarity_top_k=query.similarity_top_k,
+                #similarity_top_k=query.similarity_top_k,
+                retrieval_top_k=retrieval_top_k,
+                final_top_k=final_top_k,
                 similarity_thr=args.similarity_thr if query.similarity_thr is None else query.similarity_thr,
                 num_queries=args.num_queries if query.num_queries is None else query.num_queries,
                 response_mode=response_mode,
@@ -1499,17 +1571,32 @@ def main():
             else:
                 active_index = index if not multi_mode else None
 
-            top_k = req.similarity_top_k or 8
-            top_k = min(top_k, args.max_retrieve_top_k)
+            #top_k = req.similarity_top_k or 8
+            #top_k = min(top_k, args.max_retrieve_top_k)
+            #thr = args.similarity_thr if req.similarity_thr is None else req.similarity_thr
+            #nq = args.num_queries if req.num_queries is None else req.num_queries
+
+            final_top_k, retrieval_top_k = resolve_top_k(
+                final_top_k=req.similarity_top_k,
+                retrieval_top_k=req.retrieval_top_k,
+                default_final_top_k=8,
+                default_retrieval_top_k=args.retrieval_top_k,
+                max_final_top_k=args.max_retrieve_top_k,
+                max_retrieval_top_k=args.max_retrieve_retrieval_top_k,
+            )
             thr = args.similarity_thr if req.similarity_thr is None else req.similarity_thr
             nq = args.num_queries if req.num_queries is None else req.num_queries
+
+            logger.info(f"Retrieving source nodes with: final_top_k={final_top_k}, retrieval_top_k={retrieval_top_k}, thr={thr}, nq={nq}")
 
             source_nodes = retrieve_source_nodes(
                 query_text=req.query,
                 index=active_index,
                 indices=active_indices if active_multi_mode else None,
                 multi_mode=active_multi_mode,
-                similarity_top_k=top_k,
+                #similarity_top_k=top_k,
+                retrieval_top_k=retrieval_top_k,
+                final_top_k=final_top_k,
                 similarity_thr=thr,
                 num_queries=nq,
             )
@@ -1533,7 +1620,9 @@ def main():
                 documents=documents,
                 debug={
                     "query": req.query,
-                    "similarity_top_k": top_k,
+                    #"similarity_top_k": top_k,
+                    "similarity_top_k": final_top_k,
+                    "retrieval_top_k": retrieval_top_k,
                     "similarity_thr": thr,
                     "num_queries": nq,
                     "multi_mode": active_multi_mode,
