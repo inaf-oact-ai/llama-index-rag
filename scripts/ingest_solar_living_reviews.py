@@ -294,6 +294,7 @@ def crossref_to_metadata(item: Dict[str, Any], pdf_path: str, include_references
 	md = {
 		"kind": "living-review-solar-physics",
 		"collection": "living_reviews_solar_physics",
+		####"collection": "solar-living-reviews",
 		"domain": "solar_physics",
 		"source_family": "springer_living_reviews",
 		"source_name": journal or "Living Reviews in Solar Physics",
