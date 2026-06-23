@@ -27,6 +27,7 @@ from llama_index.core.selectors import PydanticSingleSelector, PydanticMultiSele
 from llama_index.core.selectors.embedding_selectors import EmbeddingSingleSelector
 from llama_index.core.retrievers import QueryFusionRetriever
 from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.core import PromptTemplate
 
 # - Import FastAPI
 import uvicorn
@@ -180,7 +181,8 @@ class Query(BaseModel):
     domain: Optional[str] = None
     collections: Optional[list[str]] = None
     similarity_thr: Optional[float] = None
-    num_queries: Optional[int] = None 
+    num_queries: Optional[int] = None
+    response_mode: Optional[str] = None
 
 class Response(BaseModel):
     search_result: str
@@ -791,7 +793,46 @@ def build_fusion_retriever(
     )
 
 
-def build_query_engine(
+def build_text_qa_template():
+    """Build the QA prompt used by LlamaIndex during answer synthesis."""
+
+    return PromptTemplate(
+        "You are a scientific Retrieval-Augmented Generation assistant.\n"
+        "You must answer using only the provided context.\n"
+        "If the context does not contain enough information to answer the question, "
+        "say that the provided sources do not contain enough information.\n\n"
+        "Context:\n"
+        "---------------------\n"
+        "{context_str}\n"
+        "---------------------\n\n"
+        "Question:\n"
+        "{query_str}\n\n"
+        "Answer:"
+    )
+
+def build_refine_template():
+    """Build the refine prompt used by response modes that refine an existing answer."""
+
+    return PromptTemplate(
+        "You are refining a scientific answer using additional retrieved context.\n"
+        "The existing answer is shown below.\n"
+        "Only improve the answer if the new context supports the improvement.\n"
+        "If the new context is not useful, keep the existing answer unchanged.\n\n"
+        "Existing answer:\n"
+        "---------------------\n"
+        "{existing_answer}\n"
+        "---------------------\n\n"
+        "New context:\n"
+        "---------------------\n"
+        "{context_msg}\n"
+        "---------------------\n\n"
+        "Question:\n"
+        "{query_str}\n\n"
+        "Refined answer:"
+    )
+
+
+def build_query_engine_old(
     index=None,
     indices: dict | None = None,
     multi_mode: bool = False,
@@ -821,6 +862,49 @@ def build_query_engine(
         response_mode="tree_summarize",
         include_metadata=True,
         output=Response,
+        node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=similarity_thr)],
+    )
+
+
+def build_query_engine(
+    index=None,
+    indices: dict | None = None,
+    multi_mode: bool = False,
+    similarity_top_k: int = 5,
+    similarity_thr: float = 0.5,
+    num_queries: int = 1,
+    response_mode: str = "compact",
+):
+    """Build query engine."""
+
+    text_qa_template = build_text_qa_template()
+    refine_template = build_refine_template()
+
+    if not multi_mode:
+        return index.as_query_engine(
+            similarity_top_k=similarity_top_k,
+            output=Response,
+            response_mode=response_mode,
+            include_metadata=True,
+            text_qa_template=text_qa_template,
+            refine_template=refine_template,
+            node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=similarity_thr)],
+            verbose=True,
+        )
+
+    fusion = build_fusion_retriever(
+        indices=indices,
+        similarity_top_k=similarity_top_k,
+        num_queries=num_queries,
+    )
+
+    return RetrieverQueryEngine.from_args(
+        fusion,
+        response_mode=response_mode,
+        include_metadata=True,
+        output=Response,
+        text_qa_template=text_qa_template,
+        refine_template=refine_template,
         node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=similarity_thr)],
     )
 
@@ -982,6 +1066,29 @@ def load_args():
     parser.set_defaults(retrieval_only_no_llm=False)
     parser.add_argument("--max_retrieve_top_k", type=int, default=100, help="Maximum top-k accepted by /api/retrieve.") 
 
+    parser.add_argument(
+        "--response_mode",
+        type=str,
+        default="compact",
+        choices=["compact", "refine", "tree_summarize", "simple_summarize"],
+        help=(
+            "LlamaIndex response synthesis mode. "
+            "Use compact for concise QA, tree_summarize for broad summaries, "
+            "and refine for careful source-by-source refinement."
+        ),
+    )
+
+    parser.add_argument(
+        "--append_query_instruction",
+        dest="append_query_instruction",
+        action="store_true",
+        help=(
+            "Legacy behavior: append the RAG instruction directly to the user query. "
+            "Disabled by default because it can perturb retrieval embeddings."
+        ),
+    )
+    parser.set_defaults(append_query_instruction=False)
+    
     logger.info("Parsing arguments ...")
     args = parser.parse_args()
 
@@ -1248,20 +1355,18 @@ def main():
             active_multi_mode = len(active_indices) > 1
             active_index = None if active_multi_mode else next(iter(active_indices.values()))
 
-        # - Build query engine    
+        # - Build query engine   
         try:
+            response_mode = query.response_mode or args.response_mode
+        
             query_engine = build_query_engine(
-                #index=index if not multi_mode else None,
-                #indices=indices if multi_mode else None,
                 index=active_index if not active_multi_mode else None,
                 indices=active_indices if active_multi_mode else None,
-                #multi_mode=multi_mode,
                 multi_mode=active_multi_mode,
                 similarity_top_k=query.similarity_top_k,
-                #similarity_thr=args.similarity_thr,
                 similarity_thr=args.similarity_thr if query.similarity_thr is None else query.similarity_thr,
-                #num_queries=args.num_queries,
-                num_queries=args.num_queries if query.num_queries is None else query.num_queries
+                num_queries=args.num_queries if query.num_queries is None else query.num_queries,
+                response_mode=response_mode,
             )
             
         except Exception as e:
@@ -1277,7 +1382,12 @@ def main():
         # - Run query
         logger.info("Querying engine ...")
         try:
-            response = query_engine.query(query.query + "\n\n" + query_instr)
+            query_text = query.query
+            if args.append_query_instruction:
+                query_text = query.query + "\n\n" + query_instr
+
+            response = query_engine.query(query_text)
+            ###response = query_engine.query(query.query + "\n\n" + query_instr)
         except Exception as e:
             logger.error(f"Failed to run query engine (err={str(e)})!")
             err_resp= Response(status=-1, search_result="Failed to query engine", sources=[], content_found=False)

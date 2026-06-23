@@ -708,6 +708,14 @@ def format_authors_for_display(raw_authors, fallback: str = "Unknown source") ->
 #]
 
 EXAMPLES = DOMAIN["examples"]
+RESPONSE_MODE_OPTIONS = {
+    "Fast QA over retrieved context": "compact",
+    "Broad review-style synthesis": "tree_summarize",
+    "Careful source-by-source refinement": "refine",
+    "Very short summary from retrieved text": "simple_summarize",
+}
+
+
 
 st.info("Enter a question and click *Search*. Below, you find some examples. *Click* one of them for testing.")
 #st.markdown("**Below, you find some example test queries. Click one of them:**")
@@ -730,6 +738,19 @@ with st.form(key="query_form"):
     )
     
     top_k = st.slider("Similarity top-k", min_value=1, max_value=10, value=default_topk, step=1)
+    
+    
+    response_mode_label = st.selectbox(
+        "Answer synthesis mode",
+        list(RESPONSE_MODE_OPTIONS.keys()),
+        index=0,
+        help=(
+            "Choose how the retrieved chunks are synthesized into the final answer. "
+            "Fast QA is the best default."
+        ),
+    )
+    response_mode = RESPONSE_MODE_OPTIONS[response_mode_label]
+
     submitted = st.form_submit_button("Search")
     
     # Auto-submit if an example button was clicked
@@ -748,6 +769,7 @@ if submitted:
         "similarity_top_k": int(top_k),
         "domain": DOMAIN_KEY,
         "collections": DOMAIN["collections"],
+        "response_mode": response_mode,
     }
 
     with st.spinner("Querying RAG service…"):
@@ -781,7 +803,9 @@ if submitted:
         st.info("No relevant content found (below similarity threshold).")
 
     st.write(answer or "_(empty response)_")
-    st.caption(f"Latency: {latency:.2f}s  •  top-k={top_k}")
+    st.caption(
+        f"Latency: {latency:.2f}s  •  top-k={top_k}  •  synthesis={response_mode_label}"
+    )
 
     # --- References ---
     st.subheader("References (by similarity)")
