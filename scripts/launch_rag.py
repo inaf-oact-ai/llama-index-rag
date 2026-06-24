@@ -137,6 +137,98 @@ def preserve_source_scores(sources: list[dict], score_type: str):
 
 	return output_sources
 
+def build_metadata_filter_spec(request_obj) -> dict:
+    """Build a normalized metadata filter spec from an API request object."""
+
+    filter_spec = {
+        "year_min": getattr(request_obj, "year_min", None),
+        "year_max": getattr(request_obj, "year_max", None),
+        "doctype": getattr(request_obj, "doctype", None),
+        "source_type": getattr(request_obj, "source_type", None),
+        "journal": getattr(request_obj, "journal", None),
+        "author": getattr(request_obj, "author", None),
+    }
+
+    return {
+        key: value
+        for key, value in filter_spec.items()
+        if value is not None and str(value).strip() != ""
+    }
+	
+
+def _metadata_string_contains(md: dict, keys: list[str], expected: Optional[str]) -> bool:
+    """Case-insensitive substring match over several metadata keys."""
+
+    if expected is None:
+        return True
+
+    expected = str(expected).strip().lower()
+    if not expected:
+        return True
+
+    for key in keys:
+        value = md.get(key)
+
+        if isinstance(value, str) and expected in value.lower():
+            return True
+
+        if isinstance(value, list):
+            for item in value:
+                if expected in str(item).lower():
+                    return True
+
+    return False
+
+
+def _node_matches_metadata_filters(sn: NodeWithScore, filter_spec: Optional[dict]) -> bool:
+    """Return True if a node matches all requested metadata filters."""
+
+    if not filter_spec:
+        return True
+
+    md = sn.node.metadata or {}
+
+    year = _extract_year_from_metadata(md)
+    year_min = filter_spec.get("year_min")
+    year_max = filter_spec.get("year_max")
+
+    if year_min is not None:
+        if year is None or year < int(year_min):
+            return False
+
+    if year_max is not None:
+        if year is None or year > int(year_max):
+            return False
+
+    if not _metadata_string_contains(
+        md,
+        ["kind", "doctype", "document_type", "source_type"],
+        filter_spec.get("doctype"),
+    ):
+        return False
+
+    if not _metadata_string_contains(
+        md,
+        ["source_type", "source_family", "source_name"],
+        filter_spec.get("source_type"),
+    ):
+        return False
+
+    if not _metadata_string_contains(
+        md,
+        ["journal", "journal_name", "journal_short", "container_title", "publication", "source_name"],
+        filter_spec.get("journal"),
+    ):
+        return False
+
+    if not _metadata_string_contains(
+        md,
+        ["authors", "author", "first_author", "creator"],
+        filter_spec.get("author"),
+    ):
+        return False
+
+    return True
 
 def _safe_first_author(value):
     if isinstance(value, list) and value:
@@ -286,6 +378,14 @@ class Query(BaseModel):
     similarity_thr: Optional[float] = None
     num_queries: Optional[int] = None
     response_mode: Optional[str] = None
+    
+    # - Add metadata filters
+    year_min: Optional[int] = None
+    year_max: Optional[int] = None
+    doctype: Optional[str] = None
+    source_type: Optional[str] = None
+    journal: Optional[str] = None
+    author: Optional[str] = None
 
 class Response(BaseModel):
     search_result: str
@@ -307,6 +407,14 @@ class RetrieveRequest(BaseModel):
     num_queries: Optional[int] = None
     response_mode: Optional[str] = "no_text"
     include_text: bool = True
+    
+    # - Add metadata filters
+    year_min: Optional[int] = None
+    year_max: Optional[int] = None
+    doctype: Optional[str] = None
+    source_type: Optional[str] = None
+    journal: Optional[str] = None
+    author: Optional[str] = None
 
 class RetrievedDocument(BaseModel):
     doc_id: str
@@ -371,6 +479,27 @@ class PreserveOriginalScorePostprocessor(BaseNodePostprocessor):
 				sn.node.metadata["similarity_score"] = json_safe_score(sn.score)
 
 		return nodes
+
+
+class MetadataFilterPostprocessor(BaseNodePostprocessor):
+    """Filter retrieved nodes using request-level metadata constraints."""
+
+    filter_spec: dict = Field(default_factory=dict)
+
+    def _postprocess_nodes(
+        self,
+        nodes: list[NodeWithScore],
+        query_bundle=None,
+        query_str: Optional[str] = None,
+    ):
+        if not self.filter_spec:
+            return nodes
+
+        return [
+            sn
+            for sn in nodes or []
+            if _node_matches_metadata_filters(sn, self.filter_spec)
+        ]
 
 class DocumentDedupPostprocessor(BaseNodePostprocessor):
     """Keep only the top-ranked chunk(s) per source document."""
@@ -1103,6 +1232,7 @@ def build_node_postprocessors(
     similarity_thr: Optional[float],
     final_top_k: int,
     args=None,
+    metadata_filter_spec: Optional[dict] = None,
 ):
     """
     Build the ordered postprocessing chain.
@@ -1120,6 +1250,10 @@ def build_node_postprocessors(
         node_postprocessors.append(
             SimilarityPostprocessor(similarity_cutoff=similarity_thr)
         )
+        
+    # - Add metadata filtering
+    if metadata_filter_spec:
+        node_postprocessors.append(MetadataFilterPostprocessor(filter_spec=metadata_filter_spec))
 
     # - Add reranker processor
     if args is not None and getattr(args, "reranker", "none") == "sentence_transformer":
@@ -1171,6 +1305,7 @@ def postprocess_retrieved_nodes(
     similarity_thr: Optional[float],
     final_top_k: int,
     args=None,
+    metadata_filter_spec: Optional[dict] = None,
 ):
     """
     Apply the common postprocessing chain used by both /api/search and /api/retrieve.
@@ -1186,6 +1321,7 @@ def postprocess_retrieved_nodes(
         similarity_thr=similarity_thr,
         final_top_k=final_top_k,
         args=args,
+        metadata_filter_spec=metadata_filter_spec,
     )
 
     query_bundle = QueryBundle(query_str=query_text)
@@ -1203,6 +1339,7 @@ def describe_node_postprocessors(
 	similarity_thr: Optional[float],
 	final_top_k: int,
 	args=None,
+	metadata_filter_spec: Optional[dict] = None,
 ):
 	"""Return postprocessor class names for debug output."""
 
@@ -1212,6 +1349,7 @@ def describe_node_postprocessors(
 			similarity_thr=similarity_thr,
 			final_top_k=final_top_k,
 			args=args,
+			metadata_filter_spec=metadata_filter_spec,
 		)
 	]
 
@@ -1226,6 +1364,7 @@ def build_query_engine(
     num_queries: int = 1,
     response_mode: str = "compact",
     args=None,
+    metadata_filter_spec: Optional[dict] = None,
 ):
     """Build query engine."""
 
@@ -1235,6 +1374,7 @@ def build_query_engine(
         similarity_thr=similarity_thr,
         final_top_k=final_top_k,
         args=args,
+        metadata_filter_spec=metadata_filter_spec,
     )
 
     if not multi_mode:
@@ -1279,6 +1419,7 @@ def retrieve_source_nodes(
     similarity_thr: float = 0.5,
     num_queries: int = 1,
     args=None,
+    metadata_filter_spec: Optional[dict] = None,
 ):
     """ Retrieve source node """
     if not multi_mode:
@@ -1308,6 +1449,7 @@ def retrieve_source_nodes(
         similarity_thr=similarity_thr,
         final_top_k=final_top_k,
         args=args,
+        metadata_filter_spec=metadata_filter_spec,
     )
 
 
@@ -1436,15 +1578,7 @@ def load_args():
     parser.add_argument("--retrieval_only_no_llm", dest="retrieval_only_no_llm", action="store_true", help="Start retrieval service without requiring an LLM. /api/retrieve works; /api/search may be disabled.")
     parser.set_defaults(retrieval_only_no_llm=False)
     parser.add_argument("--max_retrieve_top_k", type=int, default=100, help="Maximum top-k accepted by /api/retrieve.") 
-    parser.add_argument(
-        "--retrieval_top_k",
-        type=int,
-        default=30,
-        help=(
-            "Number of chunks initially retrieved before final truncation or reranking. "
-            "Use a larger value than similarity_top_k, e.g. 30."
-        ),
-    )
+    parser.add_argument("--retrieval_top_k", type=int, default=50, help="Number of chunks initially retrieved before final truncation or reranking. Use a larger value than similarity_top_k, e.g. 30.")
     parser.add_argument("--max_search_retrieval_top_k", type=int, default=100, help="Maximum retrieval_top_k accepted by /api/search.")
     parser.add_argument("--max_retrieve_retrieval_top_k", type=int, default=500, help="Maximum retrieval_top_k accepted by /api/retrieve.")
 
@@ -1502,7 +1636,7 @@ def load_args():
     parser.add_argument("--deduplicate_documents", dest="deduplicate_documents", action="store_true", help="Deduplicate retrieved chunks by source document after filtering/reranking and before final top-k truncation.")
     parser.add_argument("--no_deduplicate_documents", dest="deduplicate_documents", action="store_false", help="Disable document-level deduplication.")
     parser.set_defaults(deduplicate_documents=True)
-    parser.add_argument("--dedup_keep_per_document", type=int, default=1, help="Number of chunks to keep per source document when deduplication is enabled.")
+    parser.add_argument("--dedup_keep_per_document", type=int, default=2, help="Number of chunks to keep per source document when deduplication is enabled.")
     
     logger.info("Parsing arguments ...")
     args = parser.parse_args()
@@ -1781,12 +1915,14 @@ def main():
             max_final_top_k=50,
             max_retrieval_top_k=args.max_search_retrieval_top_k,
         )
+        metadata_filter_spec = build_metadata_filter_spec(query)
         
         logger.info(
             f"Building query engine with: response_mode={response_mode}, "
             f"final_top_k={final_top_k}, retrieval_top_k={retrieval_top_k}, "
             f"reranker={args.reranker}, reranker_model={args.reranker_model}, "
-            f"rerank_top_n={args.rerank_top_n}"
+            f"rerank_top_n={args.rerank_top_n}, "
+            f"metadata_filter_spec={metadata_filter_spec}"
         )
         
         try:    
@@ -1801,6 +1937,7 @@ def main():
                 num_queries=args.num_queries if query.num_queries is None else query.num_queries,
                 response_mode=response_mode,
                 args=args,
+                metadata_filter_spec=metadata_filter_spec,
             )
             
         except Exception as e:
@@ -1954,8 +2091,9 @@ def main():
             )
             thr = args.similarity_thr if req.similarity_thr is None else req.similarity_thr
             nq = args.num_queries if req.num_queries is None else req.num_queries
+            metadata_filter_spec = build_metadata_filter_spec(req)
 
-            logger.info(f"Retrieving source nodes with: final_top_k={final_top_k}, retrieval_top_k={retrieval_top_k}, thr={thr}, nq={nq}")
+            logger.info(f"Retrieving source nodes with: final_top_k={final_top_k}, retrieval_top_k={retrieval_top_k}, thr={thr}, nq={nq}, metadata_filter_spec={metadata_filter_spec}")
 
             source_nodes = retrieve_source_nodes(
                 query_text=req.query,
@@ -1968,6 +2106,7 @@ def main():
                 similarity_thr=thr,
                 num_queries=nq,
                 args=args,
+                metadata_filter_spec=metadata_filter_spec,
             )
 
             score_type = resolve_score_type(args)
@@ -2000,6 +2139,7 @@ def main():
                     "retrieval_top_k": retrieval_top_k,
                     "similarity_thr": thr,
                     "num_queries": nq,
+                    "metadata_filters": metadata_filter_spec,
                     "reranker": args.reranker,
                     "reranker_model": args.reranker_model if args.reranker != "none" else None,
                     "rerank_top_n": args.rerank_top_n if args.reranker != "none" else None,
@@ -2008,6 +2148,7 @@ def main():
                         similarity_thr=thr,
                         final_top_k=final_top_k,
                         args=args,
+                        metadata_filter_spec=metadata_filter_spec,
                     ),
                     "deduplicate_documents": getattr(args, "deduplicate_documents", True),
                     "dedup_keep_per_document": getattr(args, "dedup_keep_per_document", 1),
