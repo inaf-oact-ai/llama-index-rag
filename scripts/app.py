@@ -775,6 +775,8 @@ if submitted:
     with st.spinner("Querying RAG service…"):
         try:
             t0 = time.time()
+            #print("Submitting payload to backend:")
+            #print(payload)
             r = requests.post(url, json=payload, timeout=300)
             latency = time.time() - t0
         except Exception as e:

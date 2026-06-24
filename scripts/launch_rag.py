@@ -21,6 +21,10 @@ from llama_index.vector_stores.qdrant import QdrantVectorStore
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.ollama import Ollama
 from llama_index.core.postprocessor import SimilarityPostprocessor
+try:
+    from llama_index.core.postprocessor import SentenceTransformerRerank
+except Exception:
+    SentenceTransformerRerank = None    
 from llama_index.core.tools import QueryEngineTool
 from llama_index.core.query_engine import RouterQueryEngine
 from llama_index.core.selectors import PydanticSingleSelector, PydanticMultiSelector, LLMMultiSelector
@@ -897,6 +901,53 @@ def truncate_nodes(nodes, top_k: Optional[int]):
         return nodes
     return list(nodes or [])[:top_k]
 
+def build_node_postprocessors(
+    similarity_thr: Optional[float],
+    final_top_k: int,
+    args=None,
+):
+    """
+    Build the ordered postprocessing chain.
+
+    Order:
+    1. Similarity threshold filtering
+    2. Optional reranking
+    3. Final top-k truncation
+    """
+
+    
+
+    node_postprocessors = []
+
+    if similarity_thr is not None:
+        node_postprocessors.append(
+            SimilarityPostprocessor(similarity_cutoff=similarity_thr)
+        )
+
+    if args is not None and getattr(args, "reranker", "none") == "sentence_transformer":
+        if SentenceTransformerRerank is None:
+            raise RuntimeError(
+                "SentenceTransformerRerank is not available in this LlamaIndex installation. "
+                "Install the required LlamaIndex postprocessor dependencies or set --reranker none."
+            )
+
+        rerank_top_n = getattr(args, "rerank_top_n", final_top_k)
+        rerank_top_n = max(1, int(rerank_top_n))
+        rerank_top_n = max(rerank_top_n, final_top_k)
+
+        node_postprocessors.append(
+            SentenceTransformerRerank(
+                model=getattr(args, "reranker_model", "cross-encoder/ms-marco-MiniLM-L-6-v2"),
+                top_n=rerank_top_n,
+            )
+        )
+
+    node_postprocessors.append(
+        TopKPostprocessor(top_k=final_top_k)
+    )
+
+    return node_postprocessors
+
 
 def build_query_engine(
     index=None,
@@ -908,18 +959,17 @@ def build_query_engine(
     similarity_thr: float = 0.5,
     num_queries: int = 1,
     response_mode: str = "compact",
+    args=None,
 ):
     """Build query engine."""
 
     text_qa_template = build_text_qa_template()
     refine_template = build_refine_template()
-    #node_postprocessors=[
-    #    SimilarityPostprocessor(similarity_cutoff=similarity_thr)
-    #]
-    node_postprocessors = [
-        SimilarityPostprocessor(similarity_cutoff=similarity_thr),
-        TopKPostprocessor(top_k=final_top_k),
-    ]
+    node_postprocessors = build_node_postprocessors(
+        similarity_thr=similarity_thr,
+        final_top_k=final_top_k,
+        args=args,
+    )
 
     if not multi_mode:
         return index.as_query_engine(
@@ -962,6 +1012,7 @@ def retrieve_source_nodes(
     final_top_k: int = 8,
     similarity_thr: float = 0.5,
     num_queries: int = 1,
+    args=None,
 ):
     """ Retrieve source node """
     if not multi_mode:
@@ -977,13 +1028,25 @@ def retrieve_source_nodes(
 
     nodes = retriever.retrieve(query_text)
 
-    if similarity_thr is not None:
-        nodes = [
-            sn for sn in nodes
-            if sn.score is None or sn.score >= similarity_thr
-        ]
+    #if similarity_thr is not None:
+    #    nodes = [
+    #        sn for sn in nodes
+    #        if sn.score is None or sn.score >= similarity_thr
+    #    ]
         
-    nodes = truncate_nodes(nodes, final_top_k)        
+    #nodes = truncate_nodes(nodes, final_top_k)        
+
+    node_postprocessors = build_node_postprocessors(
+        similarity_thr=similarity_thr,
+        final_top_k=final_top_k,
+        args=args,
+    )
+
+    for postprocessor in node_postprocessors:
+        nodes = postprocessor.postprocess_nodes(
+            nodes,
+            query_str=query_text,
+        )
 
     return nodes
 
@@ -1147,6 +1210,35 @@ def load_args():
             "Disabled by default because it can perturb retrieval embeddings."
         ),
     )
+    
+    parser.add_argument(
+        "--reranker",
+        type=str,
+        default="none",
+        choices=["none", "sentence_transformer"],
+        help=(
+            "Optional reranker applied after vector retrieval and similarity filtering. "
+            "Use 'sentence_transformer' to enable SentenceTransformerRerank."
+        ),
+    )
+
+    parser.add_argument(
+        "--reranker_model",
+        type=str,
+        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        help="SentenceTransformer cross-encoder model used when --reranker sentence_transformer.",
+    )
+
+    parser.add_argument(
+        "--rerank_top_n",
+        type=int,
+        default=5,
+        help=(
+            "Number of nodes kept by the reranker. "
+            "Usually this should match or slightly exceed the final synthesis top-k."
+        ),
+    )
+    
     parser.set_defaults(append_query_instruction=False)
     
     logger.info("Parsing arguments ...")
@@ -1426,7 +1518,13 @@ def main():
             max_final_top_k=50,
             max_retrieval_top_k=args.max_search_retrieval_top_k,
         )
-        logger.info(f"Building query engine with: response_mode={response_mode}, final_top_k={final_top_k}, retrieval_top_k={retrieval_top_k}")
+        
+        logger.info(
+            f"Building query engine with: response_mode={response_mode}, "
+            f"final_top_k={final_top_k}, retrieval_top_k={retrieval_top_k}, "
+            f"reranker={args.reranker}, reranker_model={args.reranker_model}, "
+            f"rerank_top_n={args.rerank_top_n}"
+        )
         
         try:    
             query_engine = build_query_engine(
@@ -1439,6 +1537,7 @@ def main():
                 similarity_thr=args.similarity_thr if query.similarity_thr is None else query.similarity_thr,
                 num_queries=args.num_queries if query.num_queries is None else query.num_queries,
                 response_mode=response_mode,
+                args=args,
             )
             
         except Exception as e:
@@ -1599,6 +1698,7 @@ def main():
                 final_top_k=final_top_k,
                 similarity_thr=thr,
                 num_queries=nq,
+                args=args,
             )
 
             sources = sources_from_nodes(source_nodes)
@@ -1625,6 +1725,9 @@ def main():
                     "retrieval_top_k": retrieval_top_k,
                     "similarity_thr": thr,
                     "num_queries": nq,
+                    "reranker": args.reranker,
+                    "reranker_model": args.reranker_model if args.reranker != "none" else None,
+                    "rerank_top_n": args.rerank_top_n if args.reranker != "none" else None,
                     "multi_mode": active_multi_mode,
                     "requested_collections": requested_collections,
                     #"available_collections": list(indices.keys()) if multi_mode else [args.collection_name],
