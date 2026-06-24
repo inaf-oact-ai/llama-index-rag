@@ -1208,6 +1208,7 @@ def build_query_fusion_prompt():
         "You are generating search-query rewrites for a scientific retrieval system.\n"
         "Generate exactly {num_queries} rewritten search queries, one per line.\n"
         "Each rewrite must preserve the exact intent of the original query.\n"
+        "Use different wording where possible, but preserve the exact meaning.\n"
         "Do not introduce new entities, instruments, wavelengths, physical processes, causal assumptions, examples, or subtopics unless they are explicitly present in the original query.\n"
         "Do not narrow the query to one observational band, method, object class, author, or phenomenon unless the original query already does so.\n"
         "Do not generate follow-up questions.\n"
