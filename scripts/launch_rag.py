@@ -32,7 +32,7 @@ from llama_index.core.selectors.embedding_selectors import EmbeddingSingleSelect
 from llama_index.core.retrievers import QueryFusionRetriever
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core import PromptTemplate
-from llama_index.core.schema import NodeWithScore
+from llama_index.core.schema import NodeWithScore, QueryBundle
 try:
     from llama_index.core.postprocessor.types import BaseNodePostprocessor
 except:
@@ -136,6 +136,7 @@ def preserve_source_scores(sources: list[dict], score_type: str):
 		output_sources.append(source)
 
 	return output_sources
+
 
 def _safe_first_author(value):
     if isinstance(value, list) and value:
@@ -371,7 +372,32 @@ class PreserveOriginalScorePostprocessor(BaseNodePostprocessor):
 
 		return nodes
 
+class DocumentDedupPostprocessor(BaseNodePostprocessor):
+    """Keep only the top-ranked chunk(s) per source document."""
 
+    keep_per_document: int = 1
+
+    def _postprocess_nodes(
+        self,
+        nodes: list[NodeWithScore],
+        query_bundle=None,
+        query_str: Optional[str] = None,
+    ):
+        seen_counts = {}
+        deduped_nodes = []
+
+        for sn in nodes or []:
+            key = document_key_from_node(sn)
+            count = seen_counts.get(key, 0)
+
+            if count >= self.keep_per_document:
+                continue
+
+            seen_counts[key] = count + 1
+            deduped_nodes.append(sn)
+
+        return deduped_nodes
+		
 ###################################
 ####    RAG HELPERS
 ###################################
@@ -565,6 +591,41 @@ def _document_key_from_metadata(md: dict[str, Any], fallback_id: Any) -> str:
 
     return f"point:{fallback_id}"
 
+
+def document_key_from_node(sn: NodeWithScore) -> str:
+    """
+    Build a stable document-level key for deduplication.
+
+    The key should identify the source document, not the individual chunk.
+    """
+
+    md = sn.node.metadata or {}
+
+    for key in [
+        "source_id",
+        "doi",
+        "arxiv_id",
+        "bibcode",
+        "isbn",
+        "document_hash",
+        "document_id",
+        "doc_id",
+        "file_path",
+        "filepath",
+        "file_name",
+        "title",
+        "paper_title",
+        "document_title",
+    ]:
+        value = md.get(key)
+
+        if isinstance(value, str) and value.strip():
+            return f"{key}:{value.strip().lower()}"
+
+        if isinstance(value, list) and value:
+            return f"{key}:{str(value[0]).strip().lower()}"
+
+    return f"node:{_node_id(sn) or sn.node.node_id}"
 
 def summarize_qdrant_collection(
     client: qdrant_client.QdrantClient,
@@ -1052,15 +1113,15 @@ def build_node_postprocessors(
     3. Final top-k truncation
     """
 
-    
-
     node_postprocessors = []
 
+    # - Add similarity processor
     if similarity_thr is not None:
         node_postprocessors.append(
             SimilarityPostprocessor(similarity_cutoff=similarity_thr)
         )
 
+    # - Add reranker processor
     if args is not None and getattr(args, "reranker", "none") == "sentence_transformer":
         if SentenceTransformerRerank is None:
             raise RuntimeError(
@@ -1083,12 +1144,76 @@ def build_node_postprocessors(
             )
         )
 
+    # - Add doc deduplication processor
+    if args is not None and getattr(args, "deduplicate_documents", True):
+        dedup_keep_per_document = getattr(args, "dedup_keep_per_document", 1)
+
+        try:
+            dedup_keep_per_document = int(dedup_keep_per_document)
+        except Exception:
+            dedup_keep_per_document = 1
+
+        node_postprocessors.append(
+            DocumentDedupPostprocessor(keep_per_document=max(1, dedup_keep_per_document))
+        )
+
+    # - Add top-k post processor
     node_postprocessors.append(
         TopKPostprocessor(top_k=final_top_k)
     )
 
     return node_postprocessors
 
+
+def postprocess_retrieved_nodes(
+    nodes: list[NodeWithScore],
+    query_text: str,
+    similarity_thr: Optional[float],
+    final_top_k: int,
+    args=None,
+):
+    """
+    Apply the common postprocessing chain used by both /api/search and /api/retrieve.
+
+    Current chain:
+    1. Similarity threshold filtering
+    2. Optional original-score preservation
+    3. Optional reranking
+    4. Final top-k truncation
+    """
+
+    node_postprocessors = build_node_postprocessors(
+        similarity_thr=similarity_thr,
+        final_top_k=final_top_k,
+        args=args,
+    )
+
+    query_bundle = QueryBundle(query_str=query_text)
+
+    for postprocessor in node_postprocessors:
+        nodes = postprocessor.postprocess_nodes(
+            nodes,
+            query_bundle=query_bundle,
+        )
+
+    return nodes
+
+
+def describe_node_postprocessors(
+	similarity_thr: Optional[float],
+	final_top_k: int,
+	args=None,
+):
+	"""Return postprocessor class names for debug output."""
+
+	return [
+		type(pp).__name__
+		for pp in build_node_postprocessors(
+			similarity_thr=similarity_thr,
+			final_top_k=final_top_k,
+			args=args,
+		)
+	]
 
 def build_query_engine(
     index=None,
@@ -1177,20 +1302,13 @@ def retrieve_source_nodes(
         
     #nodes = truncate_nodes(nodes, final_top_k)        
 
-    node_postprocessors = build_node_postprocessors(
+    return postprocess_retrieved_nodes(
+        nodes=nodes,
+        query_text=query_text,
         similarity_thr=similarity_thr,
         final_top_k=final_top_k,
         args=args,
     )
-
-    for postprocessor in node_postprocessors:
-        nodes = postprocessor.postprocess_nodes(
-            nodes,
-            query_str=query_text,
-        )
-
-    return nodes
-
 
 
 def build_llm(args):
@@ -1351,6 +1469,7 @@ def load_args():
             "Disabled by default because it can perturb retrieval embeddings."
         ),
     )
+    parser.set_defaults(append_query_instruction=False)
     
     parser.add_argument(
         "--reranker",
@@ -1380,7 +1499,10 @@ def load_args():
         ),
     )
     
-    parser.set_defaults(append_query_instruction=False)
+    parser.add_argument("--deduplicate_documents", dest="deduplicate_documents", action="store_true", help="Deduplicate retrieved chunks by source document after filtering/reranking and before final top-k truncation.")
+    parser.add_argument("--no_deduplicate_documents", dest="deduplicate_documents", action="store_false", help="Disable document-level deduplication.")
+    parser.set_defaults(deduplicate_documents=True)
+    parser.add_argument("--dedup_keep_per_document", type=int, default=1, help="Number of chunks to keep per source document when deduplication is enabled.")
     
     logger.info("Parsing arguments ...")
     args = parser.parse_args()
@@ -1882,6 +2004,13 @@ def main():
                     "reranker_model": args.reranker_model if args.reranker != "none" else None,
                     "rerank_top_n": args.rerank_top_n if args.reranker != "none" else None,
                     "score_type": score_type,
+                    "postprocessors": describe_node_postprocessors(
+                        similarity_thr=thr,
+                        final_top_k=final_top_k,
+                        args=args,
+                    ),
+                    "deduplicate_documents": getattr(args, "deduplicate_documents", True),
+                    "dedup_keep_per_document": getattr(args, "dedup_keep_per_document", 1),
                     "multi_mode": active_multi_mode,
                     "requested_collections": requested_collections,
                     #"available_collections": list(indices.keys()) if multi_mode else [args.collection_name],
