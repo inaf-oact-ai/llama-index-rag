@@ -1151,6 +1151,7 @@ def build_fusion_retriever(
         retrievers=retrievers,
         similarity_top_k=similarity_top_k,
         num_queries=num_queries,
+        query_gen_prompt=build_query_fusion_prompt(),
         use_async=False,
         verbose=True,
     )
@@ -1198,6 +1199,23 @@ def build_refine_template():
         "Question:\n"
         "{query_str}\n\n"
         "Refined answer:"
+    )
+    
+def build_query_fusion_prompt():
+    """Build a conservative query-generation prompt for QueryFusionRetriever."""
+
+    return (
+        "You are generating search-query rewrites for a scientific retrieval system.\n"
+        "Generate exactly {num_queries} rewritten search queries, one per line.\n"
+        "Each rewrite must preserve the exact intent of the original query.\n"
+        "Do not introduce new entities, instruments, wavelengths, physical processes, causal assumptions, examples, or subtopics unless they are explicitly present in the original query.\n"
+        "Do not narrow the query to one observational band, method, object class, author, or phenomenon unless the original query already does so.\n"
+        "Do not generate follow-up questions.\n"
+        "Do not number the queries.\n"
+        "Do not add explanations.\n\n"
+        "Original query:\n"
+        "{query}\n\n"
+        "Rewritten queries:\n"
     )
 
 def resolve_top_k(
