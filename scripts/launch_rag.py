@@ -392,6 +392,7 @@ class Response(BaseModel):
     content_found: bool
     status: int
     sources: list
+    debug: dict = Field(default_factory=dict)
     
 class RetrieveRequest(BaseModel):
     query: str
@@ -1920,6 +1921,7 @@ def main():
             max_retrieval_top_k=args.max_search_retrieval_top_k,
         )
         metadata_filter_spec = build_metadata_filter_spec(query)
+        score_type = resolve_score_type(args)
         
         logger.info(
             f"Building query engine with: response_mode={response_mode}, "
@@ -1929,6 +1931,34 @@ def main():
             f"metadata_filter_spec={metadata_filter_spec}"
         )
         
+        # - Set debug return field
+        debug = {
+            "query": query.query,
+            "similarity_top_k": final_top_k,
+            "retrieval_top_k": retrieval_top_k,
+            "similarity_thr": args.similarity_thr if query.similarity_thr is None else query.similarity_thr,
+            "num_queries": args.num_queries if query.num_queries is None else query.num_queries,
+            "metadata_filters": metadata_filter_spec,
+            "reranker": args.reranker,
+            "reranker_model": args.reranker_model if args.reranker != "none" else None,
+            "rerank_top_n": args.rerank_top_n if args.reranker != "none" else None,
+            "score_type": score_type,
+            "postprocessors": describe_node_postprocessors(
+                similarity_thr=args.similarity_thr if query.similarity_thr is None else query.similarity_thr,
+                final_top_k=final_top_k,
+                args=args,
+                metadata_filter_spec=metadata_filter_spec,
+            ),
+            "deduplicate_documents": getattr(args, "deduplicate_documents", True),
+            "dedup_keep_per_document": getattr(args, "dedup_keep_per_document", 1),
+            "multi_mode": active_multi_mode,
+            "requested_collections": requested_collections,
+            "available_collections": available_collections,
+            "returned": 0,
+            
+        }
+        
+        # - Build query engine
         try:    
             query_engine = build_query_engine(
                 index=active_index if not active_multi_mode else None,
@@ -1951,6 +1981,7 @@ def main():
                 search_result="Failed to retrieve query engine",
                 sources=[],
                 content_found=False,
+                debug=debug,
             )
             return err_resp
             
@@ -1965,8 +1996,9 @@ def main():
             ###response = query_engine.query(query.query + "\n\n" + query_instr)
         except Exception as e:
             logger.error(f"Failed to run query engine (err={str(e)})!")
-            err_resp= Response(status=-1, search_result="Failed to query engine", sources=[], content_found=False)
+            err_resp= Response(status=-1, search_result="Failed to query engine", sources=[], content_found=False, debug=debug)
             return err_resp
+            
             
         # - Parsing response
         logger.info(f"Parsing response: {response} ...")
@@ -1991,11 +2023,12 @@ def main():
             print("response_sources")
             print(response_sources)
             
-            score_type = resolve_score_type(args)
             response_sources = preserve_source_scores(
                 response_sources,
                 score_type=score_type,
             )
+            
+            debug["returned"]= len(response_sources)
 
             # - Modify the message in case of nothing found
             if not content_found and response_text=="Empty Response":
@@ -2006,7 +2039,8 @@ def main():
                 search_result=response_text,
                 sources=response_sources,
                 status=0,
-                content_found=content_found
+                content_found=content_found,
+                debug=debug,
             )
         except Exception as e:
             logger.error(f"Failed to parse response (err={str(e)})!")
@@ -2015,6 +2049,7 @@ def main():
                 search_result="Failed to parse response",
                 sources=[],
                 content_found=False,
+                debug=debug,
             )
             return err_resp
 
