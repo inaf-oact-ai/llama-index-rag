@@ -573,7 +573,28 @@ def _score_label(score: float | None) -> str:
         return "n/a"
     return f"{score:.3f}"
 
+def _format_reference_scores(src: dict) -> tuple[str, float | None]:
+    """
+    Format score display for a retrieved source.
 
+    Returns:
+        HTML label and the score used for badge color.
+    """
+
+    score_type = src.get("score_type")
+    similarity_score = src.get("similarity_score", src.get("score"))
+    rerank_score = src.get("rerank_score")
+
+    if score_type == "reranker" or rerank_score is not None:
+        label = (
+            f"sim {_score_label(similarity_score)}"
+            f" · rerank {_score_label(rerank_score)}"
+        )
+        return label, similarity_score
+
+    label = f"sim {_score_label(similarity_score)}"
+    return label, similarity_score
+	
 def _arxiv_id_from_meta(meta: dict) -> str | None:
     # common metadata keys where an arXiv id might live
     for k in ["arxiv_id", "arXiv", "arxiv", "eprint_id", "eprint", "arxivId", "identifier"]:
@@ -810,14 +831,37 @@ if submitted:
     )
 
     # --- References ---
-    st.subheader("References (by similarity)")
+    #st.subheader("References (by similarity)")
+    #sources = data.get("sources", []) or []
+
+    #sources_sorted = sorted(
+    #    sources,
+    #    key=lambda s: (s.get("score") is not None, s.get("score", 0.0)),
+    #    reverse=True,
+    #)
+
     sources = data.get("sources", []) or []
 
-    sources_sorted = sorted(
-        sources,
-        key=lambda s: (s.get("score") is not None, s.get("score", 0.0)),
-        reverse=True,
+    has_rerank_scores = any(
+        src.get("score_type") == "reranker" or src.get("rerank_score") is not None
+	      for src in sources
     )
+
+    if has_rerank_scores:
+        st.subheader("References (reranked)")
+        st.caption(
+            "References are ordered by reranker relevance. "
+		        "Similarity is the original vector score; rerank is the cross-encoder score."
+	      )
+        sources_sorted = sources
+    else:
+        st.subheader("References (by similarity)")
+        sources_sorted = sorted(
+            sources,
+            key=lambda s: (s.get("score") is not None, s.get("score", 0.0)),
+            reverse=True,
+	      )
+
 
     if not sources_sorted:
         st.caption("No references.")
@@ -933,7 +977,13 @@ if submitted:
             print(f"download_url: {download_url}")
 
             # - Set score badge
-            score_html = f"<span class='score-badge {_score_class(score)}'>{_score_label(score)}</span>"
+            #score_html = f"<span class='score-badge {_score_class(score)}'>{_score_label(score)}</span>"
+            score_label, score_for_color = _format_reference_scores(src)
+            score_html = (
+                f"<span class='score-badge {_score_class(score_for_color)}'>"
+                f"{score_label}"
+                f"</span>"
+            )
 
             # - Set citation
             #details = []
@@ -953,7 +1003,8 @@ if submitted:
             st.markdown(
                 #f"<div class='ref-line'><strong>{i}. {display_name}</strong>{extra_html} • "
                 f"<div class='ref-line'>[{i}] <strong> {authors} </strong>, {extra_html} — "
-                f"score {score_html} "
+                #f"score {score_html} "
+                f"{score_html} "
                 + (f" • {link_html}" if link_html else "")
                 + (f" • {download_html}" if download_html else "")
                 + "</div>",

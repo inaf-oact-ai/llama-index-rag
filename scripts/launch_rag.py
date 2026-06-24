@@ -77,6 +77,66 @@ def json_safe_score(score):
     except Exception:
         return None
 
+
+def resolve_score_type(args=None):
+	"""Return active scoring mode."""
+
+	if args is not None and getattr(args, "reranker", "none") != "none":
+		return "reranker"
+
+	return "similarity"
+
+
+def extract_similarity_score(source: dict, score_type: str):
+	"""Extract original vector similarity score."""
+
+	metadata = source.get("metadata") or {}
+
+	if score_type == "reranker":
+		return json_safe_score(
+			metadata.get("similarity_score")
+			or source.get("similarity_score")
+		)
+
+	return json_safe_score(source.get("score"))
+
+
+def extract_rerank_score(source: dict, score_type: str):
+	"""Extract reranker score, if reranking is active."""
+
+	if score_type != "reranker":
+		return None
+
+	return json_safe_score(source.get("score"))
+
+def preserve_source_scores(sources: list[dict], score_type: str):
+	"""Expose similarity and reranker scores while keeping score as similarity."""
+
+	output_sources = []
+
+	for source in sources or []:
+		source = dict(source)
+		metadata = dict(source.get("metadata") or {})
+
+		similarity_score = extract_similarity_score(source, score_type=score_type)
+		rerank_score = extract_rerank_score(source, score_type=score_type)
+
+		source["similarity_score"] = similarity_score
+		source["rerank_score"] = rerank_score
+		source["score_type"] = score_type
+
+		# Keep legacy frontend score as vector similarity.
+		source["score"] = similarity_score
+
+		source["metadata"] = {
+			str(k): json_safe_value(v)
+			for k, v in metadata.items()
+		}
+
+		output_sources.append(source)
+
+	return output_sources
+
 def _safe_first_author(value):
     if isinstance(value, list) and value:
         return value[0]
@@ -127,7 +187,7 @@ def _infer_collection_from_metadata(md):
     return md.get("collection") or md.get("collection_name") or md.get("_collection_name")
 
 #############################
-##    RAG CLASS
+##    RAG CLASSES
 #############################
 collection_descriptions = {
     "radiopapers": "Scientific papers stored in ArXiV repository with subject keywords related to radio astronomy.",
@@ -252,6 +312,9 @@ class RetrievedDocument(BaseModel):
     title: Optional[str] = None
     text: str = ""
     score: Optional[float] = None
+    similarity_score: Optional[float] = None
+    rerank_score: Optional[float] = None
+    score_type: Optional[str] = None
     collection: Optional[str] = None
     metadata: dict = Field(default_factory=dict)
 
@@ -290,7 +353,28 @@ class TopKPostprocessor(BaseNodePostprocessor):
     ):
         return nodes[: self.top_k]
 
+class PreserveOriginalScorePostprocessor(BaseNodePostprocessor):
+	"""Store the original vector retrieval score before reranking."""
 
+	def _postprocess_nodes(
+		self,
+		nodes: list[NodeWithScore],
+		query_bundle=None,
+		query_str: Optional[str] = None,
+	):
+		for sn in nodes or []:
+			if sn.node.metadata is None:
+				sn.node.metadata = {}
+
+			if "similarity_score" not in sn.node.metadata:
+				sn.node.metadata["similarity_score"] = json_safe_score(sn.score)
+
+		return nodes
+
+
+###################################
+####    RAG HELPERS
+###################################
 def resolve_requested_collections(
     requested_domain: Optional[str],
     requested_collections: Optional[list[str]],
@@ -566,7 +650,11 @@ def summarize_qdrant_collection(
             message=str(e),
         )
 
-def source_to_retrieved_document(source: dict) -> RetrievedDocument:
+def source_to_retrieved_document(
+    source: dict,
+    score_type: str = "similarity",
+) -> RetrievedDocument:
+
     original_metadata = dict(source.get("metadata") or {})
 
     metadata = dict(original_metadata)
@@ -599,12 +687,22 @@ def source_to_retrieved_document(source: dict) -> RetrievedDocument:
         or source.get("file_name")
         or str(doc_id)
     )
+    
+    similarity_score = extract_similarity_score(source, score_type=score_type)
+    rerank_score = extract_rerank_score(source, score_type=score_type)
+
+    # Keep frontend-facing score as the original vector similarity score.
+    display_score = similarity_score
 
     return RetrievedDocument(
         doc_id=str(doc_id),
         title=title,
         text=str(source.get("text") or ""),
-        score=json_safe_score(source.get("score")),
+        #score=json_safe_score(source.get("score")),
+        score=display_score,
+        similarity_score=similarity_score,
+	      rerank_score=rerank_score,
+	      score_type=score_type,
         collection=collection,
         #metadata=metadata,
         metadata={
@@ -973,6 +1071,10 @@ def build_node_postprocessors(
         rerank_top_n = getattr(args, "rerank_top_n", final_top_k)
         rerank_top_n = max(1, int(rerank_top_n))
         rerank_top_n = max(rerank_top_n, final_top_k)
+
+        node_postprocessors.append(
+            PreserveOriginalScorePostprocessor()
+	      )
 
         node_postprocessors.append(
             SentenceTransformerRerank(
@@ -1625,6 +1727,12 @@ def main():
             response_sources = sources_from_nodes(getattr(response, "source_nodes", []))
             print("response_sources")
             print(response_sources)
+            
+            score_type = resolve_score_type(args)
+            response_sources = preserve_source_scores(
+                response_sources,
+                score_type=score_type,
+            )
 
             # - Modify the message in case of nothing found
             if not content_found and response_text=="Empty Response":
@@ -1740,10 +1848,16 @@ def main():
                 args=args,
             )
 
+            score_type = resolve_score_type(args)
+
             sources = sources_from_nodes(source_nodes)
 
+            #documents = [
+            #    source_to_retrieved_document(source)
+            #    for source in sources
+            #]
             documents = [
-                source_to_retrieved_document(source)
+                source_to_retrieved_document(source, score_type=score_type)
                 for source in sources
             ]
 
@@ -1767,6 +1881,7 @@ def main():
                     "reranker": args.reranker,
                     "reranker_model": args.reranker_model if args.reranker != "none" else None,
                     "rerank_top_n": args.rerank_top_n if args.reranker != "none" else None,
+                    "score_type": score_type,
                     "multi_mode": active_multi_mode,
                     "requested_collections": requested_collections,
                     #"available_collections": list(indices.keys()) if multi_mode else [args.collection_name],
