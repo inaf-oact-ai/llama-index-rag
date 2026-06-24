@@ -1160,9 +1160,12 @@ def build_text_qa_template():
 
     return PromptTemplate(
         "You are a scientific Retrieval-Augmented Generation assistant.\n"
-        "You must answer using only the provided context.\n"
-        "If the context does not contain enough information to answer the question, "
-        "say that the provided sources do not contain enough information.\n\n"
+        "Answer the question using only the provided context.\n"
+        "If the context contains relevant evidence, synthesize the best supported answer.\n"
+        "If the evidence is partial, answer what can be supported and explicitly state the limitation.\n"
+        "Only say that the provided sources do not contain enough information when the context contains no relevant evidence for the question.\n"
+        "Where useful, refer to the retrieved sources by their document titles or authors.\n"
+        "Do not use outside knowledge.\n\n"
         "Context:\n"
         "---------------------\n"
         "{context_str}\n"
@@ -1172,14 +1175,17 @@ def build_text_qa_template():
         "Answer:"
     )
 
+
 def build_refine_template():
     """Build the refine prompt used by response modes that refine an existing answer."""
 
     return PromptTemplate(
         "You are refining a scientific answer using additional retrieved context.\n"
         "The existing answer is shown below.\n"
-        "Only improve the answer if the new context supports the improvement.\n"
-        "If the new context is not useful, keep the existing answer unchanged.\n\n"
+        "Use the new context only if it adds relevant, supported information.\n"
+        "If the new context is partially useful, improve the answer and mention any limitation.\n"
+        "If the new context is not relevant, keep the existing answer unchanged.\n"
+        "Do not introduce information unsupported by the provided context.\n\n"
         "Existing answer:\n"
         "---------------------\n"
         "{existing_answer}\n"
@@ -1192,8 +1198,6 @@ def build_refine_template():
         "{query_str}\n\n"
         "Refined answer:"
     )
-
-
 
 def resolve_top_k(
     final_top_k: Optional[int],
