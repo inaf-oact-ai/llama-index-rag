@@ -50,6 +50,33 @@ logger = structlog.get_logger()
 #############################
 ##    HELPERS
 #############################
+def json_safe_value(value):
+    """Convert numpy/scalar-like values to JSON-serializable Python values."""
+
+    if value is None:
+        return None
+
+    # numpy scalar values, e.g. np.float32, np.float64, np.int64
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:
+            pass
+
+    return value
+
+
+def json_safe_score(score):
+    """Convert retrieval score to native Python float or None."""
+
+    if score is None:
+        return None
+
+    try:
+        return float(score)
+    except Exception:
+        return None
+
 def _safe_first_author(value):
     if isinstance(value, list) and value:
         return value[0]
@@ -577,9 +604,13 @@ def source_to_retrieved_document(source: dict) -> RetrievedDocument:
         doc_id=str(doc_id),
         title=title,
         text=str(source.get("text") or ""),
-        score=source.get("score"),
+        score=json_safe_score(source.get("score")),
         collection=collection,
-        metadata=metadata,
+        #metadata=metadata,
+        metadata={
+            str(k): json_safe_value(v)
+            for k, v in metadata.items()
+        },
     )
 
 
@@ -619,7 +650,11 @@ def source_from_node(sn):
     )
 
     # Preserve all original node metadata for MAASAI.
-    source["metadata"] = dict(md)
+    #source["metadata"] = dict(md)
+    source["metadata"] = {
+        str(k): json_safe_value(v)
+        for k, v in dict(md).items()
+    }
 
     return source
 
@@ -673,7 +708,8 @@ def get_arxiv_metadata(sn, md):
     source= {
         "doctype": "arxiv",
         "node_id": sn.node.node_id,
-        "score": sn.score,                     # similarity score
+        #"score": sn.score,                     # similarity score
+        "score": json_safe_score(sn.score),
         #"file_path": md.get("file_path"),
         "file_path": _metadata_file_path(md),
         "file_name": md.get("file_name"),
@@ -715,7 +751,8 @@ def get_book_metadata(sn, md):
     source= {
         "doctype": "book",
         "node_id": sn.node.node_id,
-        "score": sn.score,                     # similarity score
+        #"score": sn.score,                     # similarity score
+        "score": json_safe_score(sn.score),
         #"file_path": md.get("file_path"),
         "file_path": _metadata_file_path(md),
         "file_name": md.get("file_name"),
@@ -746,7 +783,8 @@ def get_annreview_metadata(sn, md):
     source= {
         "doctype": "annual-review",
         "node_id": sn.node.node_id,
-        "score": sn.score,                     # similarity score
+        #"score": sn.score,                     # similarity score
+        "score": json_safe_score(sn.score),
         #"file_path": md.get("file_path"),
         "file_path": _metadata_file_path(md),
         "file_name": md.get("file_name"),
@@ -780,7 +818,8 @@ def get_solar_living_review_metadata(sn, md):
     source = {
         "doctype": "solar-living-review",
         "node_id": sn.node.node_id,
-        "score": sn.score,
+        #"score": sn.score,
+        "score": json_safe_score(sn.score),
         "file_path": _metadata_file_path(md),
         "file_name": md.get("file_name") or md.get("pdf_filename"),
         "page_label": md.get("page_label"),
