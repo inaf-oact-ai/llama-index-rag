@@ -760,7 +760,7 @@ with st.form(key="query_form"):
     
     top_k = st.slider("Similarity top-k", min_value=1, max_value=10, value=default_topk, step=1)
     
-    
+    # - Add response synthesis mode
     response_mode_label = st.selectbox(
         "Answer synthesis mode",
         list(RESPONSE_MODE_OPTIONS.keys()),
@@ -772,9 +772,128 @@ with st.form(key="query_form"):
     )
     response_mode = RESPONSE_MODE_OPTIONS[response_mode_label]
 
+    # - Add metadata filter
+    with st.expander("Advanced retrieval options", expanded=False):
+        st.caption(
+            "Use these controls to constrain retrieval by metadata or tune the retrieval "
+            "candidate pool. Leave fields empty to use backend defaults."
+        )
+
+        selected_collections = st.multiselect(
+            "Collections",
+            options=DOMAIN["collections"],
+            default=DOMAIN["collections"],
+            help="Restrict the search to one or more collections from the selected domain.",
+        )
+
+        col_a, col_b, col_c = st.columns(3)
+
+        with col_a:
+            retrieval_top_k = st.number_input(
+                "Retrieval candidate top-k",
+                min_value=1,
+                max_value=200,
+                value=int(os.environ.get("RAG_DEFAULT_RETRIEVAL_TOPK", "50")),
+                step=1,
+                help=(
+                    "Number of chunks initially retrieved before thresholding, filtering, "
+                    "deduplication, reranking, and final top-k truncation."
+                ),
+            )
+
+        with col_b:
+            num_queries = st.number_input(
+                "Query expansion count",
+                min_value=1,
+                max_value=8,
+                value=int(os.environ.get("RAG_DEFAULT_NUM_QUERIES", "1")),
+                step=1,
+                help=(
+                    "1 disables query expansion. Values above 1 enable conservative "
+                    "query-fusion rewrites in the backend."
+                ),
+            )
+
+        with col_c:
+            override_similarity_thr = st.checkbox(
+                "Override similarity threshold",
+                value=False,
+                help="When disabled, the backend startup default is used.",
+            )
+
+            similarity_thr = st.slider(
+                "Similarity threshold",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(os.environ.get("RAG_DEFAULT_SIMILARITY_THR", "0.3")),
+                step=0.01,
+                disabled=not override_similarity_thr,
+            )
+
+        st.markdown("**Metadata filters**")
+
+        col_y1, col_y2 = st.columns(2)
+
+        with col_y1:
+            year_min = st.text_input(
+                "Year min",
+                value="",
+                placeholder="Any, e.g. 2020",
+            )
+
+        with col_y2:
+            year_max = st.text_input(
+                "Year max",
+                value="",
+                placeholder="Any, e.g. 2024",
+            )
+
+        col_m1, col_m2 = st.columns(2)
+
+        with col_m1:
+            doctype_option = st.selectbox(
+                "Document type",
+                [
+                    "Any",
+                    "arxiv",
+                    "book",
+                    "annual-review",
+                    "solar-living-review",
+                    "living-review-solar-physics",
+                ],
+                index=0,
+                help="Matches common document-type metadata fields.",
+            )
+
+            source_type = st.text_input(
+                "Source type contains",
+                value="",
+                placeholder="e.g. journal_review_article",
+            )
+
+            journal = st.text_input(
+                "Journal/source contains",
+                value="",
+                placeholder="e.g. Living Reviews in Solar Physics",
+            )
+
+        with col_m2:
+            author = st.text_input(
+                "Author contains",
+                value="",
+                placeholder="e.g. Benz, Norris",
+            )
+
+            show_debug = st.checkbox(
+                "Show backend debug block",
+                value=True,
+                help="Display retrieval settings returned by /api/search.",
+            )
+
+    # - Add Search button
     submitted = st.form_submit_button("Search")
     
-    # Auto-submit if an example button was clicked
+    # - Auto-submit if an example button was clicked
     if st.session_state.pop("autosubmit", False) and not submitted:
         submitted = True
 
@@ -784,14 +903,45 @@ if submitted:
         st.stop()
 
     url = f"{API_BASE}/api/search"
-    #payload = {"query": prompt, "similarity_top_k": int(top_k)}
+    
     payload = {
         "query": prompt,
         "similarity_top_k": int(top_k),
+        "retrieval_top_k": int(retrieval_top_k),
         "domain": DOMAIN_KEY,
-        "collections": DOMAIN["collections"],
+        "collections": selected_collections or DOMAIN["collections"],
+        "num_queries": int(num_queries),
         "response_mode": response_mode,
     }
+
+    if override_similarity_thr:
+        payload["similarity_thr"] = float(similarity_thr)
+
+    if year_min.strip():
+        try:
+            payload["year_min"] = int(year_min.strip())
+        except ValueError:
+            st.warning("Year min must be an integer, e.g. 2020.")
+            st.stop()
+
+    if year_max.strip():
+        try:
+            payload["year_max"] = int(year_max.strip())
+        except ValueError:
+            st.warning("Year max must be an integer, e.g. 2024.")
+            st.stop()
+
+    if doctype_option != "Any":
+        payload["doctype"] = doctype_option
+
+    if source_type.strip():
+        payload["source_type"] = source_type.strip()
+
+    if journal.strip():
+        payload["journal"] = journal.strip()
+
+    if author.strip():
+        payload["author"] = author.strip()
 
     with st.spinner("Querying RAG service…"):
         try:
@@ -826,9 +976,23 @@ if submitted:
         st.info("No relevant content found (below similarity threshold).")
 
     st.write(answer or "_(empty response)_")
+    #st.caption(
+    #    f"Latency: {latency:.2f}s  •  top-k={top_k}  •  synthesis={response_mode_label}"
+    #)
+    
+    debug = data.get("debug", {}) or {}
+
     st.caption(
-        f"Latency: {latency:.2f}s  •  top-k={top_k}  •  synthesis={response_mode_label}"
+        f"Latency: {latency:.2f}s  •  "
+        f"top-k={top_k}  •  "
+        f"retrieval_top_k={payload.get('retrieval_top_k')}  •  "
+        f"num_queries={payload.get('num_queries')}  •  "
+        f"synthesis={response_mode_label}"
     )
+
+    if show_debug and debug:
+        with st.expander("Backend debug", expanded=False):
+            st.json(debug)
 
     # --- References ---
     #st.subheader("References (by similarity)")
@@ -1017,7 +1181,7 @@ if submitted:
 st.markdown(
     "<hr style='margin-top:3em;margin-bottom:1em;'>"
     "<p style='text-align:center;color:black;font-size:18px;'>"
-    "© 2025 S. Riggi – INAF"
+    "© 2026 S. Riggi – INAF"
     "</p>",
     unsafe_allow_html=True,
 )
